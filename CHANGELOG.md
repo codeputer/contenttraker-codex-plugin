@@ -14,6 +14,7 @@
 - Adds `inspect_contenttraker_oauth_metadata` plus a non-secret staging contract probe for `codex-mcp`, PKCE, requested scopes, and dynamic loopback redirects.
 - Defaults authentication selection by host capability, removes raw environment bearer-token authentication, and leaves container/CI workload OAuth fail closed until supported by both server metadata and a host provider.
 - Adds capability-gated OAuth device authorization with bounded RFC 8628 polling and the same secure credential-restoration path as PKCE.
+- Adds Windows/macOS/Linux Node 18 and Linux-container release gates, native desktop keyring checks, a portable artifact verifier, and an evidence-based host verification matrix.
 
 ## 0.1.2 - 2026-07-21
 

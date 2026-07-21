@@ -19,6 +19,10 @@ On 2026-07-21, staging advertised the delegated contract for public client `code
 
 Staging did not advertise a device authorization endpoint, device-code grant, client-credentials grant, token-exchange grant, or JWT-bearer grant. The plugin therefore reports device and workload authorization as unavailable. It does not synthesize endpoints or downgrade to credentials in configuration.
 
+## Production evidence
+
+On 2026-07-21, both production metadata documents returned HTTP 200 and agreed on `https://mcp.prod.contenttraker.com` and `https://tokenbroker.prod.contenttraker.com`. They advertised the expected HTTPS endpoints, code response, PKCE `S256`, public-client auth `none`, bearer headers, and required scopes. The authorization-server grant list contained only `authorization_code`; required `refresh_token` was absent. Production therefore fails closed at metadata validation until the server metadata and actual refresh policy are aligned. See issue #10.
+
 Run the optional, non-secret live verification from `plugins/contenttraker`:
 
 ```bash

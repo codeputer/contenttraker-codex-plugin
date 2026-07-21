@@ -39,6 +39,8 @@ The plugin treats the ContentTraker target (`staging` or `production`) separatel
 
 Use the unauthenticated `inspect_runtime_capabilities` tool before authentication troubleshooting. It reports the selected profile, available interaction and credential providers, session-restoration support, and redacted blocking diagnostics without calling ContentTraker or exposing credentials. See [Runtime capabilities](docs/runtime-capabilities.md).
 
+Host prerequisites and current evidence are tracked in [Platform support](docs/platform-support.md) and the [Cross-platform verification matrix](docs/verification-matrix.md).
+
 Use `inspect_contenttraker_oauth_metadata` to validate the live protected-resource and authorization-server contract before authentication. Authorization begins only after exact resource/issuer binding, HTTPS endpoints, code and refresh grants, public-client exchange, PKCE `S256`, bearer headers, and every requested scope are confirmed. See [OAuth metadata](docs/oauth-metadata.md).
 
 Interactive authorization supports platform browser launch on Windows, macOS, and non-WSL Linux; direct Linux-browser launch inside WSL; a manual loopback URL; and OAuth device authorization when live server metadata advertises it. `CONTENTTRAKER_DELEGATED_FLOW=auto` keeps authorization code + PKCE for browser-capable hosts and prefers device code for manual/headless interaction when available. Use `begin_contenttraker_authorization`, then poll `get_contenttraker_authorization_status` (optionally waiting up to 15 seconds per call). See [Authorization interaction](docs/authorization-interaction.md).
@@ -109,6 +111,7 @@ Before removal, `forget_contenttraker_credential` with confirmation `FORGET_CONT
 cd plugins/contenttraker
 npm ci
 npm test
+npm run release-artifact
 ```
 
 The committed `dist/server.mjs` bundles the runtime JavaScript so Codex can start the adapter without running `npm install`. Delegated authentication uses the WSL user's Secret Service through `secret-tool`; no native Node package is downloaded at install time.

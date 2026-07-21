@@ -8,8 +8,13 @@ permissions:
   contents: read
 
 jobs:
-  plugin:
-    runs-on: ubuntu-latest
+  host-matrix:
+    name: Node 18 / ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     defaults:
       run:
         working-directory: plugins/contenttraker
@@ -23,10 +28,30 @@ jobs:
       - run: npm ci
       - run: npm audit --omit=dev
       - run: npm test
+      - name: Verify Windows Credential Manager round trip
+        if: runner.os == 'Windows'
+        run: npm run native-credential-store
+        env:
+          CONTENTTRAKER_EXPECT_NATIVE_CREDENTIAL_STORE: windows-credential-manager
+      - name: Verify macOS Keychain round trip
+        if: runner.os == 'macOS'
+        run: npm run native-credential-store
+        env:
+          CONTENTTRAKER_EXPECT_NATIVE_CREDENTIAL_STORE: macos-keychain
+      - run: npm run release-artifact
       - run: git diff --exit-code -- dist/server.mjs package-lock.json
-      - name: Verify unused HTTP server is absent from release bundle
-        run: |
-          if grep -Eiq '@hono/node-server|serve-static|serveStatic' dist/server.mjs; then
-            echo 'Unused HTTP/static-server code was included in the release bundle.'
-            exit 1
-          fi
+
+  container:
+    name: Node 18 / Linux container
+    runs-on: ubuntu-latest
+    container: node:18-bookworm
+    defaults:
+      run:
+        working-directory: plugins/contenttraker
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm ci
+      - run: npm audit --omit=dev
+      - run: npm test
+      - run: npm run release-artifact
+      - run: git diff --exit-code -- dist/server.mjs package-lock.json
