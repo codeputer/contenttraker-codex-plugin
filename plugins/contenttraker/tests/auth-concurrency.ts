@@ -175,12 +175,11 @@ async function inFlightRequestRetainsCapturedCredential(): Promise<void> {
 }
 
 async function environmentIsolationAndNoInteractiveFallback(): Promise<void> {
-  const env = delegatedEnv({ CONTENTTRAKER_STAGING_ACCESS_TOKEN: "ambient-user-token" });
+  const env = delegatedEnv();
   const provider = createContentTrakerTokenProvider(env, new MemoryCredentialStore(), new FakeOAuthClient(new Map()) as never);
   const status = provider.getStatus(security("connection-j", "session-j", "request-j"));
   assert.equal(status.mode, "delegated-user-pkce");
   assert.equal(status.accessTokenPresent, false);
-  assert.equal(status.environmentTokenIgnored, true);
 
   const oauth = new FakeOAuthClient(new Map([["connection-j", "user-j"]]));
   const delegated = new DelegatedContentTrakerTokenProvider(new MemoryCredentialStore(), oauth as never, delegatedEnv());
@@ -189,12 +188,24 @@ async function environmentIsolationAndNoInteractiveFallback(): Promise<void> {
     /immutable adapter environment/,
   );
 
-  const service = createContentTrakerTokenProvider({
+  const legacyService = createContentTrakerTokenProvider({
     CONTENTTRAKER_AUTH_MODE: "service",
     CONTENTTRAKER_ENVIRONMENT: "production",
-    CONTENTTRAKER_STAGING_ACCESS_TOKEN: "staging-service-token",
   });
-  assert.equal(service.getStatus().configured, false);
+  assert.equal(legacyService.getStatus().mode, "invalid");
+  await assert.rejects(
+    () => legacyService.getAuthorizationHeader(security("legacy-connection", "legacy-session", "legacy-request")),
+    /Legacy service bearer-token configuration is not supported/,
+  );
+
+  const automaticWorkload = createContentTrakerTokenProvider({
+    CONTENTTRAKER_ENVIRONMENT: "staging",
+    CONTENTTRAKER_CONTAINER: "true",
+  });
+  assert.equal(automaticWorkload.getStatus().mode, "workload-oauth");
+  assert.equal((await automaticWorkload.getAuthorizationStatus(
+    security("auto-container-connection", "auto-container-session", "auto-container-request"),
+  )).status, "blocked");
 }
 
 async function effectiveCallerVerificationAndAudienceBindingAreMandatory(): Promise<void> {
@@ -229,7 +240,7 @@ async function effectiveCallerVerificationAndAudienceBindingAreMandatory(): Prom
   }
 }
 
-async function secretsAreRedactedAndServiceModeIsIsolated(): Promise<void> {
+async function secretsAreRedactedAndUnsupportedModesFailClosed(): Promise<void> {
   const oauth = new FakeOAuthClient(new Map([["connection-k", "user-k"]]));
   const provider = new DelegatedContentTrakerTokenProvider(new MemoryCredentialStore(), oauth as never, delegatedEnv());
   const throwingServer = new ThrowingServerApiClient("Authorization: Bearer raw-token refresh_token=raw-refresh cookie=raw-cookie");
@@ -241,18 +252,17 @@ async function secretsAreRedactedAndServiceModeIsIsolated(): Promise<void> {
   assert.equal(serialized.includes("raw-cookie"), false);
   assert.equal(serialized.includes("[REDACTED]"), true);
 
-  const service = createContentTrakerTokenProvider({
-    CONTENTTRAKER_AUTH_MODE: "service",
+  const workload = createContentTrakerTokenProvider({
+    CONTENTTRAKER_AUTH_MODE: "workload",
     CONTENTTRAKER_ENVIRONMENT: "staging",
-    CONTENTTRAKER_STAGING_ACCESS_TOKEN: "service-only-token",
   });
-  const serviceCredential = await service.getAuthorizationHeader(security("service-connection", "service-session", "service-request"));
-  assert.equal(serviceCredential.authenticationMode, "service");
-  assert.equal(serviceCredential.authorizationHeader, "Bearer service-only-token");
-
-  const delegated = createContentTrakerTokenProvider(delegatedEnv({ CONTENTTRAKER_STAGING_ACCESS_TOKEN: "service-only-token" }), new MemoryCredentialStore(), oauth as never);
-  assert.equal(delegated.getStatus().mode, "delegated-user-pkce");
-  assert.equal(delegated.getStatus().accessTokenPresent, false);
+  assert.equal(workload.getStatus().mode, "workload-oauth");
+  assert.equal(workload.getStatus().accessTokenPresent, false);
+  await assert.rejects(
+    () => workload.getAuthorizationHeader(security("workload-connection", "workload-session", "workload-request")),
+    /workload OAuth is unavailable/,
+  );
+  assert.equal((await workload.beginAuthorization(security("workload-connection", "workload-session", "workload-request"))).status, "blocked");
 }
 
 async function parallelRefreshUsesSingleFlight(): Promise<void> {
@@ -460,7 +470,7 @@ await oneSessionRefreshAndRevocationDoNotAffectAnother();
 await inFlightRequestRetainsCapturedCredential();
 await environmentIsolationAndNoInteractiveFallback();
 await effectiveCallerVerificationAndAudienceBindingAreMandatory();
-await secretsAreRedactedAndServiceModeIsIsolated();
+await secretsAreRedactedAndUnsupportedModesFailClosed();
 await parallelRefreshUsesSingleFlight();
 await parallelUnauthorizedRetriesUseOneRefresh();
 

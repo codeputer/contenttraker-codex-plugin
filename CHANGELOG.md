@@ -12,6 +12,7 @@
 - Serializes refresh rotation across adapter processes with metadata-free temporary locks and adds confirmed local credential deletion.
 - Negotiates and validates live protected-resource and authorization-server metadata before authorization or refresh, and rejects incomplete scope grants.
 - Adds `inspect_contenttraker_oauth_metadata` plus a non-secret staging contract probe for `codex-mcp`, PKCE, requested scopes, and dynamic loopback redirects.
+- Defaults authentication selection by host capability, removes raw environment bearer-token authentication, and leaves container/CI workload OAuth fail closed until supported by both server metadata and a host provider.
 
 ## 0.1.2 - 2026-07-21
 

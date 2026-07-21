@@ -67,12 +67,16 @@ export function inspectRuntimeCapabilities(
     diagnostics.push(...validateExplicitProfile(configuredProfile, selectedProfile, host));
   }
 
-  const authMode = env.CONTENTTRAKER_AUTH_MODE?.trim().toLowerCase() || "delegated";
-  const serviceTokenConfigured = hasEnvironmentServiceToken(env, environmentProfile.status.name);
+  const requestedAuthMode = env.CONTENTTRAKER_AUTH_MODE?.trim().toLowerCase() || "auto";
+  const validAuthMode = ["auto", "delegated", "workload"].includes(requestedAuthMode);
+  const selectedAuthMode = validAuthMode
+    ? requestedAuthMode === "auto"
+      ? selectAuthenticationMode(selectedProfile, host)
+      : requestedAuthMode as "delegated" | "workload"
+    : undefined;
   const delegatedInteractionReady = host.browserInteractionMode !== "invalid";
   const delegatedReady = delegatedInteractionReady
     && host.credentialStoreAvailable;
-  const serviceReady = authMode === "service" && serviceTokenConfigured;
 
   const interaction: RuntimeCapability[] = [
     capability(
@@ -114,16 +118,9 @@ export function inspectRuntimeCapabilities(
       "Requires ContentTraker authorization-server metadata and a device authorization provider.",
     ),
     capability(
-      "service-environment-token",
-      serviceTokenConfigured ? "available" : "blocked",
-      serviceTokenConfigured
-        ? undefined
-        : "No environment-specific service token is configured.",
-    ),
-    capability(
       "workload-identity",
       "external",
-      "Requires a supported ContentTraker workload OAuth grant and a host workload-identity provider.",
+      "Requires a live ContentTraker workload OAuth grant plus an implemented host workload-identity provider; raw bearer-token configuration is not supported.",
     ),
   ];
 
@@ -172,17 +169,15 @@ export function inspectRuntimeCapabilities(
     ),
   ];
 
-  const selectedStrategy = authMode === "service"
+  const selectedStrategy = selectedAuthMode === "workload"
     ? {
-        authentication: "service-environment-token" as const,
+        authentication: "workload-oauth" as const,
         interaction: "none" as const,
         credentialProfile: configuredCredentialProfile.toLowerCase(),
-        credentialPersistence: serviceTokenConfigured
-          ? "environment-service-token" as const
-          : "none" as const,
+        credentialPersistence: "none" as const,
         crossTaskRestoration: false,
       }
-    : authMode === "delegated"
+    : selectedAuthMode === "delegated"
       ? {
           authentication: "delegated-user-pkce" as const,
           interaction: host.browserInteractionMode === "invalid" ? "none" as const : host.browserInteractionMode,
@@ -202,20 +197,22 @@ export function inspectRuntimeCapabilities(
           crossTaskRestoration: false,
         };
 
-  if (authMode !== "delegated" && authMode !== "service") {
-    diagnostics.push("CONTENTTRAKER_AUTH_MODE must be delegated or service.");
-  } else if (authMode === "delegated" && !delegatedReady) {
+  if (!validAuthMode) {
+    diagnostics.push("CONTENTTRAKER_AUTH_MODE must be auto, delegated, or workload. Legacy service bearer-token configuration is not supported.");
+  } else if (selectedAuthMode === "delegated" && !delegatedReady) {
     diagnostics.push(delegatedBlockedReason(host));
-  } else if (authMode === "service" && !serviceReady) {
-    diagnostics.push("Service authentication is selected but its environment-specific token is missing.");
+  } else if (selectedAuthMode === "workload") {
+    diagnostics.push(
+      "Workload OAuth is blocked until live server metadata advertises a supported grant and the plugin implements the selected host workload-identity provider.",
+    );
   }
 
   const invalid = !validRequestedProfile
     || !environmentProfile.status.valid
     || !validCredentialProfile
-    || authMode !== "delegated" && authMode !== "service"
+    || !validAuthMode
     || diagnostics.some((entry) => entry.startsWith("Explicit runtime profile"));
-  const ready = !invalid && (authMode === "delegated" ? delegatedReady : serviceReady);
+  const ready = !invalid && selectedAuthMode === "delegated" && delegatedReady;
 
   return {
     status: invalid ? "invalid" : ready ? "ready" : "blocked",
@@ -226,6 +223,8 @@ export function inspectRuntimeCapabilities(
     },
     requestedProfile,
     selectedProfile,
+    requestedAuthenticationMode: requestedAuthMode,
+    selectedAuthenticationMode: selectedAuthMode,
     host,
     selectedStrategy,
     capabilities: {
@@ -311,6 +310,15 @@ function selectRuntimeProfile(
   return "headless";
 }
 
+function selectAuthenticationMode(
+  selectedProfile: SelectedRuntimeProfileName | undefined,
+  host: RuntimeHostFacts,
+): "delegated" | "workload" {
+  return selectedProfile === "container" || host.isContainer || host.isCi
+    ? "workload"
+    : "delegated";
+}
+
 function validateExplicitProfile(
   requestedProfile: string,
   selectedProfile: SelectedRuntimeProfileName,
@@ -359,14 +367,6 @@ function linuxSecretServiceBlockedReason(host: RuntimeHostFacts): string {
     return "Linux Secret Service is blocked because no D-Bus user session is available.";
   }
   return "Linux Secret Service prerequisites are unavailable.";
-}
-
-function hasEnvironmentServiceToken(
-  env: NodeJS.ProcessEnv,
-  environment: "staging" | "production" | undefined,
-): boolean {
-  if (!environment) return false;
-  return Boolean(env[`CONTENTTRAKER_${environment.toUpperCase()}_ACCESS_TOKEN`]?.trim());
 }
 
 function capability(

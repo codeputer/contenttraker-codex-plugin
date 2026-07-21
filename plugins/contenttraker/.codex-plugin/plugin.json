@@ -15,7 +15,7 @@
   "interface": {
     "displayName": "ContentTraker",
     "shortDescription": "Use ContentTraker securely from a local Codex host.",
-    "longDescription": "Connects Codex to the documented ContentTraker API using connection-scoped OAuth authorization code with PKCE, verifies the effective user, and provides workspace and digital asset tools.",
+    "longDescription": "Connects Codex to the documented ContentTraker API through capability-selected authentication and secure credential providers, verifies the effective caller, and provides workspace and digital asset tools.",
     "developerName": "PhxBiz",
     "category": "Productivity",
     "capabilities": ["MCP", "OAuth PKCE", "Workspace Context", "Digital Assets"],

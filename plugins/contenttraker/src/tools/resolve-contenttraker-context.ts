@@ -34,9 +34,11 @@ export function resolveContentTrakerContext(
   }
 
   if (!api.tokenStrategy.configured) {
-    diagnostics.push(api.tokenStrategy.mode === "service"
-      ? "Explicit service authentication mode is missing its environment-specific service token."
-      : "ContentTraker delegated OAuth authentication is not configured.");
+    diagnostics.push(api.tokenStrategy.mode === "workload-oauth"
+      ? "ContentTraker workload OAuth is not available for this host and authorization-server contract."
+      : api.tokenStrategy.mode === "invalid"
+        ? "ContentTraker authentication mode configuration is invalid."
+        : "ContentTraker delegated OAuth authentication is not configured.");
   }
 
   if (!registry.exists) {

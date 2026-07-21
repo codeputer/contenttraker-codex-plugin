@@ -13,6 +13,7 @@ import {
   type OAuthAuthorizationSession,
   type OAuthTokenResponse,
 } from "./oauth-client.js";
+import { inspectRuntimeCapabilities } from "./runtime-capabilities.js";
 import type {
   AuthorizationFlowResult,
   ContentTrakerRequestSecurityContext,
@@ -33,7 +34,7 @@ export interface ContentTrakerAuthorizationSnapshot {
   expiresAt: number;
   credentialHandle: string;
   credentialVersion: string;
-  authenticationMode: "delegated-user-pkce" | "service";
+  authenticationMode: "delegated-user-pkce" | "workload-oauth";
 }
 
 export interface ContentTrakerTokenProvider {
@@ -110,12 +111,15 @@ export function createContentTrakerTokenProvider(
   credentialStore: SecureCredentialStore = createSecureCredentialStore(env),
   oauthClient?: ContentTrakerOAuthClient,
 ): ContentTrakerTokenProvider {
-  const mode = (env.CONTENTTRAKER_AUTH_MODE?.trim().toLowerCase() || "delegated");
-  if (mode === "service") {
-    return new ServiceContentTrakerTokenProvider(env);
+  const requestedMode = env.CONTENTTRAKER_AUTH_MODE?.trim().toLowerCase() || "auto";
+  if (!["auto", "delegated", "workload"].includes(requestedMode)) {
+    return new InvalidContentTrakerTokenProvider(requestedMode);
   }
-  if (mode !== "delegated") {
-    return new InvalidContentTrakerTokenProvider(mode);
+  const mode = requestedMode === "auto"
+    ? inspectRuntimeCapabilities(env).selectedAuthenticationMode
+    : requestedMode;
+  if (mode === "workload") {
+    return new UnavailableWorkloadContentTrakerTokenProvider();
   }
 
   const profile = resolveAdapterEnvironment(env);
@@ -149,7 +153,6 @@ export class DelegatedContentTrakerTokenProvider implements ContentTrakerTokenPr
       configured: Boolean(resolveAdapterEnvironment(this.env).oauthIssuer),
       accessTokenPresent: Boolean(credential),
       source: "contenttraker-oauth-pkce",
-      environmentTokenIgnored: hasAnyEnvironmentToken(this.env),
       credentialStore: this.credentialStore.provider ?? "custom",
       credentialProfile: binding?.profile,
       crossTaskRestoration: Boolean(this.credentialStore.persistent),
@@ -575,89 +578,51 @@ export class DelegatedContentTrakerTokenProvider implements ContentTrakerTokenPr
   }
 }
 
-export class ServiceContentTrakerTokenProvider implements ContentTrakerTokenProvider {
-  private readonly effectiveCallers = new Map<string, EffectiveCaller>();
-
-  constructor(private readonly env: NodeJS.ProcessEnv = process.env) {}
-
+export class UnavailableWorkloadContentTrakerTokenProvider implements ContentTrakerTokenProvider {
   getStatus(): TokenStrategyStatus {
-    const resolved = resolveServiceToken(this.env);
     return {
-      mode: "service",
-      configured: Boolean(resolved.token),
-      accessTokenPresent: Boolean(resolved.token),
-      source: resolved.source,
-      tokenExpiryStatus: resolved.token ? "valid" : "missing",
+      mode: "workload-oauth",
+      configured: false,
+      accessTokenPresent: false,
+      source: "contenttraker-workload-oauth-unavailable",
+      tokenExpiryStatus: "missing",
     };
   }
 
-  async getAuthorizationHeader(context: ContentTrakerRequestSecurityContext): Promise<ContentTrakerAuthorizationSnapshot> {
-    const resolved = resolveServiceToken(this.env);
-    if (!resolved.token || !resolved.source) {
-      throw new Error("Explicit service authentication mode requires an environment-specific service token.");
-    }
-    const profile = resolveAdapterEnvironment(this.env);
-    if (profile.status.name !== context.environment || profile.oauthResource !== context.tokenAudience) {
-      throw new Error("Service credential environment does not match the request environment.");
-    }
-
-    return Object.freeze({
-      authorizationHeader: `Bearer ${resolved.token}`,
-      environment: context.environment,
-      authorityIssuer: "service-configuration",
-      tokenIssuer: "service-configuration",
-      subjectId: this.effectiveCallers.get(sessionKey(context))?.subjectId ?? "service-identity-unverified",
-      audience: context.tokenAudience,
-      expiresAt: Number.MAX_SAFE_INTEGER,
-      credentialHandle: resolved.source,
-      credentialVersion: createHash("sha256").update(resolved.token).digest("hex"),
-      authenticationMode: "service" as const,
-    });
+  async getAuthorizationHeader(): Promise<ContentTrakerAuthorizationSnapshot> {
+    throw new Error(
+      "ContentTraker workload OAuth is unavailable until the server advertises a supported grant and a host workload-identity provider is implemented.",
+    );
   }
 
   async beginAuthorization(): Promise<AuthorizationFlowResult> {
-    return serviceAuthorizationBlocked();
+    return workloadAuthorizationBlocked();
   }
 
   async getAuthorizationStatus(): Promise<AuthorizationFlowResult> {
-    return this.getStatus().accessTokenPresent
-      ? { status: "authorized", diagnostics: [] }
-      : serviceAuthorizationBlocked();
+    return workloadAuthorizationBlocked();
   }
 
   async cancelAuthorization(): Promise<AuthorizationFlowResult> {
-    return serviceAuthorizationBlocked();
+    return workloadAuthorizationBlocked();
   }
 
   getSecurityDiagnostics(context: ContentTrakerRequestSecurityContext): RequestSecurityDiagnostics {
-    const caller = this.effectiveCallers.get(sessionKey(context));
     return {
       environment: context.environment,
-      authenticationMode: "service",
+      authenticationMode: "workload-oauth",
       connectionId: context.connectionId,
       sessionId: context.sessionId,
       requestId: context.requestId,
-      authenticatedSubjectId: caller?.subjectId,
-      credentialHandle: resolveServiceToken(this.env).source,
       tokenAudience: context.tokenAudience,
-      tokenExpiryStatus: this.getStatus().accessTokenPresent ? "valid" : "missing",
+      tokenExpiryStatus: "missing",
       correlationId: context.correlationId,
-      contentTrakerCorrelationId: caller?.contentTrakerCorrelationId,
-      effectiveCallerVerified: Boolean(caller?.subjectId),
+      effectiveCallerVerified: false,
     };
   }
 
-  recordEffectiveCaller(
-    context: ContentTrakerRequestSecurityContext,
-    subjectId: string | undefined,
-    contentTrakerCorrelationId?: string,
-  ): void {
-    this.effectiveCallers.set(sessionKey(context), { subjectId, contentTrakerCorrelationId });
-  }
-
-  async invalidate(): Promise<void> {
-    // Service credentials are immutable process configuration and are never replaced by user credentials.
-  }
+  recordEffectiveCaller(): void {}
+  async invalidate(): Promise<void> {}
 }
 
 class InvalidContentTrakerTokenProvider implements ContentTrakerTokenProvider {
@@ -666,7 +631,9 @@ class InvalidContentTrakerTokenProvider implements ContentTrakerTokenProvider {
     return { mode: "invalid", configured: false, accessTokenPresent: false, source: this.configuredMode, tokenExpiryStatus: "missing" };
   }
   async getAuthorizationHeader(): Promise<ContentTrakerAuthorizationSnapshot> {
-    throw new Error("CONTENTTRAKER_AUTH_MODE must be delegated or service.");
+    throw new Error(
+      "CONTENTTRAKER_AUTH_MODE must be auto, delegated, or workload. Legacy service bearer-token configuration is not supported.",
+    );
   }
   async beginAuthorization(): Promise<AuthorizationFlowResult> {
     return invalidAuthorizationMode();
@@ -733,22 +700,6 @@ function parseAndValidateJwt(token: string, context: ContentTrakerRequestSecurit
   }
 
   return { tokenIssuer, subjectId, expiresAt };
-}
-
-function resolveServiceToken(env: NodeJS.ProcessEnv): { token?: string; source?: string } {
-  const profile = resolveAdapterEnvironment(env);
-  if (!profile.status.name) return {};
-  const source = `CONTENTTRAKER_${profile.status.name.toUpperCase()}_ACCESS_TOKEN`;
-  const token = env[source]?.trim();
-  return token ? { token, source } : {};
-}
-
-function hasAnyEnvironmentToken(env: NodeJS.ProcessEnv): boolean {
-  return Boolean(
-    env.CONTENTTRAKER_ACCESS_TOKEN?.trim()
-      || env.CONTENTTRAKER_STAGING_ACCESS_TOKEN?.trim()
-      || env.CONTENTTRAKER_PRODUCTION_ACCESS_TOKEN?.trim(),
-  );
 }
 
 function resolveCredentialBinding(
@@ -900,17 +851,21 @@ function interaction(
   return oauthClient.interactionMode === "invalid" ? undefined : oauthClient.interactionMode;
 }
 
-function serviceAuthorizationBlocked(): AuthorizationFlowResult {
+function workloadAuthorizationBlocked(): AuthorizationFlowResult {
   return {
     status: "blocked",
-    diagnostics: ["Interactive authorization is unavailable when CONTENTTRAKER_AUTH_MODE=service."],
+    diagnostics: [
+      "ContentTraker workload OAuth requires an advertised server grant and an implemented host workload-identity provider.",
+    ],
   };
 }
 
 function invalidAuthorizationMode(): AuthorizationFlowResult {
   return {
     status: "blocked",
-    diagnostics: ["CONTENTTRAKER_AUTH_MODE must be delegated or service."],
+    diagnostics: [
+      "CONTENTTRAKER_AUTH_MODE must be auto, delegated, or workload. Legacy service bearer-token configuration is not supported.",
+    ],
   };
 }
 

@@ -7,7 +7,10 @@ import { resolveAdapterEnvironment } from "./environment-profile.js";
 import { ContentTrakerOAuthClient } from "./oauth-client.js";
 import { ContentTrakerOAuthMetadataResolver } from "./oauth-metadata.js";
 import { ContentTrakerSecurityContextFactory } from "./security-context.js";
-import { createContentTrakerTokenProvider } from "./token-provider.js";
+import {
+  createContentTrakerTokenProvider,
+  type ContentTrakerTokenProvider,
+} from "./token-provider.js";
 import { appendDigitalAssetUploadChunk } from "./tools/append-digital-asset-upload-chunk.js";
 import { beginDigitalAssetUpload } from "./tools/begin-digital-asset-upload.js";
 import { completeDigitalAssetUpload } from "./tools/complete-digital-asset-upload.js";
@@ -32,13 +35,21 @@ const oauthClient = new ContentTrakerOAuthClient(
   undefined,
   oauthMetadataResolver,
 );
-const tokenProvider = createContentTrakerTokenProvider(
+let tokenProvider = createContentTrakerTokenProvider(
   process.env,
   createSecureCredentialStore(),
   oauthClient,
 );
-const apiClient = new EnvironmentContentTrakerApiClient(tokenProvider);
+let apiClient = new EnvironmentContentTrakerApiClient(tokenProvider);
 const securityContextFactory = new ContentTrakerSecurityContextFactory();
+
+export function setContentTrakerTokenProviderForInternalTest(provider: ContentTrakerTokenProvider): void {
+  if (process.env.CONTENTTRAKER_INTERNAL_TEST_ADAPTER !== "1") {
+    throw new Error("The ContentTraker internal test adapter is disabled.");
+  }
+  tokenProvider = provider;
+  apiClient = new EnvironmentContentTrakerApiClient(tokenProvider);
+}
 
 const server = new McpServer({
   name: "contenttraker",
@@ -190,7 +201,7 @@ server.registerTool(
     if (before.mode !== "delegated-user-pkce") {
       const result = {
         status: "blocked",
-        diagnostics: ["Local delegated credential deletion is unavailable in service or invalid authentication mode."],
+        diagnostics: ["Local delegated credential deletion is unavailable in workload or invalid authentication mode."],
       };
       return {
         content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
@@ -703,5 +714,6 @@ server.registerTool(
   },
 );
 
-const transport = new StdioServerTransport();
-await server.connect(transport);
+export async function connectContentTrakerMcpServer(): Promise<void> {
+  await server.connect(new StdioServerTransport());
+}

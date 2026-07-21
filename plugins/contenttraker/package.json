@@ -5,8 +5,9 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "build": "tsc --noEmit && esbuild src/server.ts --bundle --minify --platform=node --format=esm --target=node18 --outfile=dist/server.mjs",
-    "smoke": "npm run build && node tests/smoke.mjs",
+    "build": "tsc --noEmit && esbuild src/main.ts --bundle --minify --platform=node --format=esm --target=node18 --outfile=dist/server.mjs",
+    "build-internal-test-server": "tsc --noEmit -p tsconfig.tests.json && esbuild tests/internal-test-server.ts --bundle --platform=node --format=esm --target=node18 --outfile=node_modules/.cache/contenttraker-internal-test-server.mjs",
+    "smoke": "npm run build && npm run build-internal-test-server && node tests/smoke.mjs",
     "auth-concurrency": "tsc --noEmit -p tsconfig.tests.json && esbuild tests/auth-concurrency.ts --bundle --platform=node --format=esm --target=node18 --outfile=node_modules/.cache/contenttraker-auth-concurrency.mjs && node node_modules/.cache/contenttraker-auth-concurrency.mjs",
     "runtime-capabilities": "tsc --noEmit -p tsconfig.tests.json && esbuild tests/runtime-capabilities.ts --bundle --platform=node --format=esm --target=node18 --outfile=node_modules/.cache/contenttraker-runtime-capabilities.mjs && node node_modules/.cache/contenttraker-runtime-capabilities.mjs",
     "authorization-interaction": "tsc --noEmit -p tsconfig.tests.json && esbuild tests/authorization-interaction.ts --bundle --platform=node --format=esm --target=node18 --outfile=node_modules/.cache/contenttraker-authorization-interaction.mjs && node node_modules/.cache/contenttraker-authorization-interaction.mjs",

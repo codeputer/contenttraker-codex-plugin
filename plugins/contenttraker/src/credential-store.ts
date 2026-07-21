@@ -94,7 +94,7 @@ export function resolveCredentialStore(
   if (requestedMode === "auto" && automatedHost) {
     return unavailable(
       requestedMode,
-      "Automatic delegated credential persistence is disabled in containers and CI; select memory explicitly or use service authentication.",
+      "Automatic delegated credential persistence is disabled in containers and CI; select memory explicitly for ephemeral delegated authorization or use supported workload OAuth.",
     );
   }
 

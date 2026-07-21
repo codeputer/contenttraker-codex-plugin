@@ -35,13 +35,15 @@ Start a new Codex session after installation so the plugin tools and skill are l
 
 The plugin treats the ContentTraker target (`staging` or `production`) separately from the host runtime (`windows-desktop`, `macos-desktop`, `linux-desktop`, `wsl-desktop`, `headless`, or `container`). `CONTENTTRAKER_RUNTIME_PROFILE` defaults to `auto` and selects a desktop profile only when matching host capability evidence exists.
 
+`CONTENTTRAKER_AUTH_MODE` also defaults to `auto`. It selects delegated OAuth for non-container user hosts and workload OAuth for containers or CI. Workload mode currently fails closed because staging advertises no workload grant and no host workload provider is implemented. The plugin does not accept access tokens through configuration. See [Configuration and selection](docs/configuration.md).
+
 Use the unauthenticated `inspect_runtime_capabilities` tool before authentication troubleshooting. It reports the selected profile, available interaction and credential providers, session-restoration support, and redacted blocking diagnostics without calling ContentTraker or exposing credentials. See [Runtime capabilities](docs/runtime-capabilities.md).
 
 Use `inspect_contenttraker_oauth_metadata` to validate the live protected-resource and authorization-server contract before authentication. Authorization begins only after exact resource/issuer binding, HTTPS endpoints, code and refresh grants, public-client exchange, PKCE `S256`, bearer headers, and every requested scope are confirmed. See [OAuth metadata](docs/oauth-metadata.md).
 
 Interactive authorization supports platform browser launch on Windows, macOS, and non-WSL Linux; direct Linux-browser launch inside WSL; and a manual URL flow for headless or isolated hosts. Use `begin_contenttraker_authorization`, then poll `get_contenttraker_authorization_status` (optionally waiting up to 15 seconds per call). Use `cancel_contenttraker_authorization` to close a pending local callback listener. See [Authorization interaction](docs/authorization-interaction.md).
 
-Delegated refresh credentials use Windows Credential Manager, macOS Keychain, or Linux Secret Service according to host capabilities. `CONTENTTRAKER_CREDENTIAL_PROFILE` defaults to `default` and gives the credential a durable, connection-independent lookup key. A new Codex task refreshes that profile without repeating browser authorization. Containers and CI do not auto-select a user keyring; an ephemeral memory store must be selected explicitly, or service authentication must be configured. See [Credential storage](docs/credential-storage.md).
+Delegated refresh credentials use Windows Credential Manager, macOS Keychain, or Linux Secret Service according to host capabilities. `CONTENTTRAKER_CREDENTIAL_PROFILE` defaults to `default` and gives the credential a durable, connection-independent lookup key. A new Codex task refreshes that profile without repeating browser authorization. Containers and CI do not auto-select a user keyring; explicit delegated mode may use an explicitly selected ephemeral memory store, while unattended operation requires supported workload OAuth. See [Credential storage](docs/credential-storage.md).
 
 ## Authentication and host identity policy
 

@@ -5,8 +5,7 @@
       "command": "node",
       "args": ["./dist/server.mjs"],
       "env": {
-        "CONTENTTRAKER_ENVIRONMENT": "staging",
-        "CONTENTTRAKER_AUTH_MODE": "delegated"
+        "CONTENTTRAKER_ENVIRONMENT": "staging"
       }
     }
   }

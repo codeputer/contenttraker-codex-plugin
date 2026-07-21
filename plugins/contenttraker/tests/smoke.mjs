@@ -8,8 +8,13 @@ import { fileURLToPath } from "node:url";
 import { generate as generateSelfSignedCertificate } from "selfsigned";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const serverPath = path.resolve(__dirname, "../dist/server.mjs");
+const serverPath = path.resolve(__dirname, "../node_modules/.cache/contenttraker-internal-test-server.mjs");
+const productionServerPath = path.resolve(__dirname, "../dist/server.mjs");
 const repositoryRoot = path.resolve(__dirname, "../../..");
+const mcpManifest = JSON.parse(fs.readFileSync(path.resolve(__dirname, "../.mcp.json"), "utf8"));
+assert.deepEqual(mcpManifest.mcpServers["contenttraker-codex-adapter"].env, {
+  CONTENTTRAKER_ENVIRONMENT: "staging",
+});
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "contenttraker-codex-"));
 const testCertificate = await generateSelfSignedCertificate(
   [{ name: "commonName", value: "127.0.0.1" }],
@@ -282,35 +287,32 @@ try {
     env: {
       CONTENTTRAKER_RUNTIME_PROFILE: "headless",
       CONTENTTRAKER_ENVIRONMENT: "staging",
-      CONTENTTRAKER_STAGING_ACCESS_TOKEN: "test-staging-token",
     },
     arguments: {},
   });
   assert.equal(runtimeCapabilities.status, "ready");
   assert.equal(runtimeCapabilities.selectedProfile, "headless");
   assert.equal(runtimeCapabilities.contentTrakerEnvironment.name, "staging");
-  assert.equal(JSON.stringify(runtimeCapabilities).includes("test-staging-token"), false);
+  assert.equal(JSON.stringify(runtimeCapabilities).includes("internal-smoke-test"), false);
 
-  const serviceAuthorizationStatus = await callTool({
+  const injectedAuthorizationStatus = await callTool({
     name: "get_contenttraker_authorization_status",
     env: {
       CONTENTTRAKER_ENVIRONMENT: "staging",
-      CONTENTTRAKER_STAGING_ACCESS_TOKEN: "test-staging-token",
     },
     arguments: {},
   });
-  assert.equal(serviceAuthorizationStatus.status, "authorized");
-  assert.equal(JSON.stringify(serviceAuthorizationStatus).includes("test-staging-token"), false);
+  assert.equal(injectedAuthorizationStatus.status, "authorized");
+  assert.equal(JSON.stringify(injectedAuthorizationStatus).includes("internal-smoke-test"), false);
 
-  const serviceAuthorizationBegin = await callTool({
+  const injectedAuthorizationBegin = await callTool({
     name: "begin_contenttraker_authorization",
     env: {
       CONTENTTRAKER_ENVIRONMENT: "staging",
-      CONTENTTRAKER_STAGING_ACCESS_TOKEN: "test-staging-token",
     },
     arguments: {},
   });
-  assert.equal(serviceAuthorizationBegin.status, "blocked");
+  assert.equal(injectedAuthorizationBegin.status, "authorized");
 
   const unconfigured = await callTool({
     name: "resolve_contenttraker_context",
@@ -326,7 +328,8 @@ try {
   assert.equal(unconfigured.api.environment, "staging");
   assert.equal(unconfigured.api.configured, true);
   assert.equal(unconfigured.api.baseUrlSource, "built-in-environment-profile");
-  assert.equal(unconfigured.api.tokenStrategy.configured, false);
+  assert.equal(unconfigured.api.tokenStrategy.configured, true);
+  assert.equal(unconfigured.api.tokenStrategy.source, "injected-internal-test-provider");
   assert.equal(unconfigured.api.writePolicy.mode, "staging-writes-enabled");
 
   const currentUser = await callTool({
@@ -334,7 +337,6 @@ try {
     env: {
       CONTENTTRAKER_ENVIRONMENT: "staging",
       CONTENTTRAKER_API_BASE_URL: apiBaseUrl,
-      CONTENTTRAKER_STAGING_ACCESS_TOKEN: "test-staging-token",
       CONTENTTRAKER_REQUIRED_USER_EMAIL: "operator@example.org",
     },
     arguments: {},
@@ -348,7 +350,6 @@ try {
     env: {
       CONTENTTRAKER_ENVIRONMENT: "staging",
       CONTENTTRAKER_API_BASE_URL: apiBaseUrl,
-      CONTENTTRAKER_STAGING_ACCESS_TOKEN: "test-staging-token",
       CONTENTTRAKER_REQUIRED_USER_EMAIL: "different@example.org",
     },
     arguments: {},
@@ -360,7 +361,6 @@ try {
     env: {
       CONTENTTRAKER_ENVIRONMENT: "staging",
       CONTENTTRAKER_API_BASE_URL: apiBaseUrl,
-      CONTENTTRAKER_STAGING_ACCESS_TOKEN: "test-staging-token",
       CONTENTTRAKER_REQUIRED_USER_EMAIL: "operator@example.org",
     },
     arguments: {},
@@ -374,7 +374,6 @@ try {
       CONTENTTRAKER_CODEX_REGISTRY: stagingRegistryPath,
       CONTENTTRAKER_ENVIRONMENT: "staging",
       CONTENTTRAKER_API_BASE_URL: apiBaseUrl,
-      CONTENTTRAKER_STAGING_ACCESS_TOKEN: "test-staging-token",
     },
   });
 
@@ -385,7 +384,7 @@ try {
   assert.equal(staging.registry.documentVersion, 2);
   assert.equal(staging.api.configured, true);
   assert.equal(staging.api.baseUrlSource, "CONTENTTRAKER_API_BASE_URL");
-  assert.equal(staging.api.tokenStrategy.source, "CONTENTTRAKER_STAGING_ACCESS_TOKEN");
+  assert.equal(staging.api.tokenStrategy.source, "injected-internal-test-provider");
 
   const readiness = await callTool({
     name: "probe_contenttraker_api_readiness",
@@ -393,7 +392,6 @@ try {
       CONTENTTRAKER_CODEX_REGISTRY: stagingRegistryPath,
       CONTENTTRAKER_ENVIRONMENT: "staging",
       CONTENTTRAKER_API_BASE_URL: apiBaseUrl,
-      CONTENTTRAKER_STAGING_ACCESS_TOKEN: "test-staging-token",
     },
   });
 
@@ -402,8 +400,8 @@ try {
   assert.equal(readiness.checks.every((check) => check.status === "ok"), true);
   assert.equal(readiness.checks.find((check) => check.name === "workspaces").matched, true);
   assert.equal(readiness.checks.find((check) => check.name === "workspace-projects").matched, true);
-  assert.equal(JSON.stringify(readiness).includes("test-staging-token"), false);
-  assert.equal(seenAuthorizationHeaders.includes("Bearer test-staging-token"), true);
+  assert.equal(JSON.stringify(readiness).includes("internal-smoke-test"), false);
+  assert.equal(seenAuthorizationHeaders.includes("Bearer internal-smoke-test"), true);
 
   const contract = await callTool({
     name: "inspect_contenttraker_api_contract",
@@ -411,7 +409,6 @@ try {
       CONTENTTRAKER_CODEX_REGISTRY: stagingRegistryPath,
       CONTENTTRAKER_ENVIRONMENT: "staging",
       CONTENTTRAKER_API_BASE_URL: apiBaseUrl,
-      CONTENTTRAKER_STAGING_ACCESS_TOKEN: "test-staging-token",
     },
   });
 
@@ -430,7 +427,7 @@ try {
     contract.diagnostics.some((diagnostic) => diagnostic.includes("does not call the remote server-side MCP")),
     true,
   );
-  assert.equal(JSON.stringify(contract).includes("test-staging-token"), false);
+  assert.equal(JSON.stringify(contract).includes("internal-smoke-test"), false);
 
   const assetTypes = await callTool({
     name: "list_digital_asset_types",
@@ -438,7 +435,6 @@ try {
       CONTENTTRAKER_CODEX_REGISTRY: stagingRegistryPath,
       CONTENTTRAKER_ENVIRONMENT: "staging",
       CONTENTTRAKER_API_BASE_URL: apiBaseUrl,
-      CONTENTTRAKER_STAGING_ACCESS_TOKEN: "test-staging-token",
     },
     arguments: { projectName: "sample-project", repositoryRoot },
   });
@@ -451,7 +447,6 @@ try {
       CONTENTTRAKER_CODEX_REGISTRY: stagingRegistryPath,
       CONTENTTRAKER_ENVIRONMENT: "staging",
       CONTENTTRAKER_API_BASE_URL: apiBaseUrl,
-      CONTENTTRAKER_STAGING_ACCESS_TOKEN: "test-staging-token",
     },
     arguments: { projectName: "sample-project", repositoryRoot, digitalAssetId: "asset-staging" },
   });
@@ -464,7 +459,6 @@ try {
       CONTENTTRAKER_CODEX_REGISTRY: stagingRegistryPath,
       CONTENTTRAKER_ENVIRONMENT: "staging",
       CONTENTTRAKER_API_BASE_URL: apiBaseUrl,
-      CONTENTTRAKER_STAGING_ACCESS_TOKEN: "test-staging-token",
     },
     arguments: { projectName: "sample-project", repositoryRoot, query: "", status: "draft" },
   });
@@ -477,7 +471,6 @@ try {
       CONTENTTRAKER_CODEX_REGISTRY: stagingRegistryPath,
       CONTENTTRAKER_ENVIRONMENT: "staging",
       CONTENTTRAKER_API_BASE_URL: apiBaseUrl,
-      CONTENTTRAKER_STAGING_ACCESS_TOKEN: "test-staging-token",
     },
     arguments: {
       projectName: "sample-project",
@@ -502,7 +495,7 @@ try {
   assert.equal(seenWriteBodies[0].idempotencyKey, "smoke-write-001");
   assert.equal(seenWriteBodies[0].status, "published");
   assert.equal(write.asset.status, "published");
-  assert.equal(JSON.stringify(write).includes("test-staging-token"), false);
+  assert.equal(JSON.stringify(write).includes("internal-smoke-test"), false);
 
   const update = await callTool({
     name: "update_digital_asset",
@@ -510,7 +503,6 @@ try {
       CONTENTTRAKER_CODEX_REGISTRY: stagingRegistryPath,
       CONTENTTRAKER_ENVIRONMENT: "staging",
       CONTENTTRAKER_API_BASE_URL: apiBaseUrl,
-      CONTENTTRAKER_STAGING_ACCESS_TOKEN: "test-staging-token",
     },
     arguments: {
       projectName: "sample-project",
@@ -528,7 +520,6 @@ try {
     CONTENTTRAKER_CODEX_REGISTRY: stagingRegistryPath,
     CONTENTTRAKER_ENVIRONMENT: "staging",
     CONTENTTRAKER_API_BASE_URL: apiBaseUrl,
-    CONTENTTRAKER_STAGING_ACCESS_TOKEN: "test-staging-token",
   };
   const beginUpload = await callTool({
     name: "begin_digital_asset_upload",
@@ -586,7 +577,6 @@ try {
       CONTENTTRAKER_CODEX_REGISTRY: stagingRegistryPath,
       CONTENTTRAKER_ENVIRONMENT: "staging",
       CONTENTTRAKER_API_BASE_URL: apiBaseUrl,
-      CONTENTTRAKER_STAGING_ACCESS_TOKEN: "test-staging-token",
     },
     arguments: {
       projectName: "sample-project",
@@ -604,7 +594,7 @@ try {
   assert.equal(lifecycleWrite.asset.indexingJobId, "job-staging");
   assert.equal(seenLifecycleBodies.length, 1);
   assert.equal(seenLifecycleBodies[0].idempotencyKey, "smoke-lifecycle-001");
-  assert.equal(JSON.stringify(lifecycleWrite).includes("test-staging-token"), false);
+  assert.equal(JSON.stringify(lifecycleWrite).includes("internal-smoke-test"), false);
 
   const upsert = await callTool({
     name: "upsert_contenttraker_registry_mapping",
@@ -638,7 +628,6 @@ try {
       CONTENTTRAKER_CODEX_REGISTRY: stagingRegistryPath,
       CONTENTTRAKER_ENVIRONMENT: "production",
       CONTENTTRAKER_API_BASE_URL: "https://generic.contenttraker.test",
-      CONTENTTRAKER_STAGING_ACCESS_TOKEN: "generic-token",
     },
   });
 
@@ -647,7 +636,8 @@ try {
   assert.equal(productionWithoutScopedConfig.registry.environmentConfigured, false);
   assert.equal(productionWithoutScopedConfig.api.configured, true);
   assert.equal(productionWithoutScopedConfig.api.baseUrlSource, "built-in-environment-profile");
-  assert.equal(productionWithoutScopedConfig.api.tokenStrategy.configured, false);
+  assert.equal(productionWithoutScopedConfig.api.tokenStrategy.configured, true);
+  assert.equal(productionWithoutScopedConfig.api.tokenStrategy.source, "injected-internal-test-provider");
   assert.equal(productionWithoutScopedConfig.api.writePolicy.mode, "production-read-only");
 
   const production = await callTool({
@@ -656,7 +646,6 @@ try {
       CONTENTTRAKER_CODEX_REGISTRY: productionRegistryPath,
       CONTENTTRAKER_ENVIRONMENT: "production",
       CONTENTTRAKER_PRODUCTION_API_BASE_URL: "https://api.contenttraker.test",
-      CONTENTTRAKER_PRODUCTION_ACCESS_TOKEN: "test-production-token",
       CONTENTTRAKER_ENABLE_PRODUCTION_WRITES: "true",
     },
   });
@@ -666,12 +655,38 @@ try {
   assert.equal(production.selectedContext.workspaceId, "workspace-production");
   assert.equal(production.api.configured, true);
   assert.equal(production.api.baseUrlSource, "CONTENTTRAKER_PRODUCTION_API_BASE_URL");
-  assert.equal(production.api.tokenStrategy.source, "CONTENTTRAKER_PRODUCTION_ACCESS_TOKEN");
+  assert.equal(production.api.tokenStrategy.source, "injected-internal-test-provider");
   assert.equal(production.api.writePolicy.mode, "production-explicit-enabled");
   assert.equal(production.api.writePolicy.writesExposed, true);
+  await verifyProductionBundleStarts();
 } finally {
   await new Promise((resolve) => apiServer.close(resolve));
   fs.rmSync(tempRoot, { recursive: true, force: true });
+}
+
+async function verifyProductionBundleStarts() {
+  const bundle = fs.readFileSync(productionServerPath, "utf8");
+  assert.equal(bundle.includes("CONTENTTRAKER_STAGING_ACCESS_TOKEN"), false);
+  assert.equal(bundle.includes("CONTENTTRAKER_PRODUCTION_ACCESS_TOKEN"), false);
+  assert.equal(bundle.includes("CONTENTTRAKER_INTERNAL_TEST_ADAPTER"), false);
+  const result = await runServer([
+    {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: {
+        protocolVersion: "2025-06-18",
+        capabilities: {},
+        clientInfo: { name: "contenttraker-production-bundle-smoke-test", version: "0.1.0" },
+      },
+    },
+    { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} },
+  ], { CONTENTTRAKER_ENVIRONMENT: "staging" }, productionServerPath, false);
+  assert.equal(result.status, 0, result.stderr || `Production bundle exited with signal ${result.signal ?? "unknown"}`);
+  assert.equal(result.stderr, "");
+  const responses = result.stdout.split(/\r?\n/u).filter(Boolean).map((line) => JSON.parse(line));
+  assert.equal(responses.length, 2);
+  assert.equal(responses[1].result.tools.some((tool) => tool.name === "inspect_runtime_capabilities"), true);
 }
 
 async function callTool({ name, env, arguments: toolArguments }) {
@@ -799,10 +814,10 @@ function readJsonBody(request, callback) {
   request.on("end", () => callback(JSON.parse(body)));
 }
 
-function runServer(requests, envOverrides) {
+function runServer(requests, envOverrides, executablePath = serverPath, internalTest = true) {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [serverPath], {
-      env: cleanEnv(envOverrides),
+    const child = spawn(process.execPath, [executablePath], {
+      env: internalTest ? cleanEnv(envOverrides) : cleanProductionEnv(envOverrides),
       stdio: ["pipe", "pipe", "pipe"],
     });
     let stdout = "";
@@ -838,6 +853,12 @@ function runServer(requests, envOverrides) {
   });
 }
 
+function cleanProductionEnv(overrides) {
+  const env = cleanEnv(overrides);
+  delete env.CONTENTTRAKER_INTERNAL_TEST_ADAPTER;
+  return env;
+}
+
 function cleanEnv(overrides) {
   const effectiveOverrides = {
     ...overrides,
@@ -847,13 +868,14 @@ function cleanEnv(overrides) {
   };
   const env = {
     ...process.env,
-    CONTENTTRAKER_AUTH_MODE: "service",
+    CONTENTTRAKER_INTERNAL_TEST_ADAPTER: "1",
     NODE_EXTRA_CA_CERTS: trustedCertificatePath,
     ...effectiveOverrides,
   };
   const keys = [
     "CONTENTTRAKER_ENVIRONMENT",
     "CONTENTTRAKER_RUNTIME_PROFILE",
+    "CONTENTTRAKER_AUTH_MODE",
     "CONTENTTRAKER_BROWSER_MODE",
     "CONTENTTRAKER_CREDENTIAL_STORE",
     "CONTENTTRAKER_CREDENTIAL_PROFILE",
@@ -864,9 +886,9 @@ function cleanEnv(overrides) {
     "CONTENTTRAKER_OAUTH_RESOURCE",
     "CONTENTTRAKER_STAGING_OAUTH_RESOURCE",
     "CONTENTTRAKER_PRODUCTION_OAUTH_RESOURCE",
-    "CONTENTTRAKER_ACCESS_TOKEN",
-    "CONTENTTRAKER_STAGING_ACCESS_TOKEN",
-    "CONTENTTRAKER_PRODUCTION_ACCESS_TOKEN",
+    "CONTENTTRAKER_OAUTH_ISSUER",
+    "CONTENTTRAKER_STAGING_OAUTH_ISSUER",
+    "CONTENTTRAKER_PRODUCTION_OAUTH_ISSUER",
     "CONTENTTRAKER_ENABLE_PRODUCTION_WRITES",
     "CONTENTTRAKER_REQUIRED_USER_EMAIL",
     "CONTENTTRAKER_TOKEN_ISSUER_SHA256",

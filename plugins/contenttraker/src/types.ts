@@ -43,7 +43,7 @@ export interface RuntimeCapability {
 }
 
 export interface RuntimeStrategySelection {
-  authentication: "delegated-user-pkce" | "service-environment-token" | "invalid";
+  authentication: "delegated-user-pkce" | "workload-oauth" | "invalid";
   interaction: "system-browser" | "manual-url" | "wsl-native" | "none";
   credentialProfile: string;
   credentialPersistence:
@@ -51,7 +51,6 @@ export interface RuntimeStrategySelection {
     | "macos-keychain"
     | "linux-secret-service"
     | "ephemeral-memory"
-    | "environment-service-token"
     | "none";
   crossTaskRestoration: boolean;
 }
@@ -65,6 +64,8 @@ export interface RuntimeCapabilitiesResult {
   };
   requestedProfile: string;
   selectedProfile?: SelectedRuntimeProfileName;
+  requestedAuthenticationMode: string;
+  selectedAuthenticationMode?: "delegated" | "workload";
   host: RuntimeHostFacts;
   selectedStrategy: RuntimeStrategySelection;
   capabilities: {
@@ -108,11 +109,10 @@ export interface EnvironmentProfileStatus {
 }
 
 export interface TokenStrategyStatus {
-  mode: "delegated-user-pkce" | "service" | "invalid";
+  mode: "delegated-user-pkce" | "workload-oauth" | "invalid";
   configured: boolean;
   accessTokenPresent: boolean;
   source?: string;
-  environmentTokenIgnored?: boolean;
   credentialStore?:
     | "windows-credential-manager"
     | "macos-keychain"

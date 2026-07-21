@@ -135,26 +135,37 @@ assert.equal(macosResult.selectedProfile, "macos-desktop");
 assert.equal(macosResult.status, "ready");
 assert.equal(macosResult.selectedStrategy.credentialPersistence, "macos-keychain");
 
-const serviceToken = "runtime-test-service-token";
+const autoDesktopResult = inspectRuntimeCapabilities(
+  { CONTENTTRAKER_ENVIRONMENT: "staging" },
+  linuxDesktop,
+);
+assert.equal(autoDesktopResult.status, "ready");
+assert.equal(autoDesktopResult.requestedAuthenticationMode, "auto");
+assert.equal(autoDesktopResult.selectedAuthenticationMode, "delegated");
+
 const containerResult = inspectRuntimeCapabilities(
-  {
-    CONTENTTRAKER_ENVIRONMENT: "staging",
-    CONTENTTRAKER_AUTH_MODE: "service",
-    CONTENTTRAKER_STAGING_ACCESS_TOKEN: serviceToken,
-  },
+  { CONTENTTRAKER_ENVIRONMENT: "staging" },
   facts({ platform: "linux", isContainer: true, isCi: true }),
 );
-assert.equal(containerResult.status, "ready");
+assert.equal(containerResult.status, "blocked");
 assert.equal(containerResult.selectedProfile, "container");
-assert.equal(containerResult.selectedStrategy.authentication, "service-environment-token");
-assert.equal(JSON.stringify(containerResult).includes(serviceToken), false);
+assert.equal(containerResult.selectedAuthenticationMode, "workload");
+assert.equal(containerResult.selectedStrategy.authentication, "workload-oauth");
+assert.match(containerResult.diagnostics.join(" "), /advertises a supported grant/);
 
-const headlessServiceResult = inspectRuntimeCapabilities(
+const ciResult = inspectRuntimeCapabilities(
+  { CONTENTTRAKER_ENVIRONMENT: "staging" },
+  facts({ platform: "linux", isCi: true }),
+);
+assert.equal(ciResult.selectedProfile, "headless");
+assert.equal(ciResult.selectedAuthenticationMode, "workload");
+assert.equal(ciResult.status, "blocked");
+
+const explicitWorkloadResult = inspectRuntimeCapabilities(
   {
     CONTENTTRAKER_RUNTIME_PROFILE: "headless",
     CONTENTTRAKER_ENVIRONMENT: "staging",
-    CONTENTTRAKER_AUTH_MODE: "service",
-    CONTENTTRAKER_STAGING_ACCESS_TOKEN: serviceToken,
+    CONTENTTRAKER_AUTH_MODE: "workload",
   },
   facts({
     platform: "windows",
@@ -162,8 +173,28 @@ const headlessServiceResult = inspectRuntimeCapabilities(
     systemBrowserLauncherAvailable: true,
   }),
 );
-assert.equal(headlessServiceResult.status, "ready");
-assert.equal(headlessServiceResult.selectedProfile, "headless");
+assert.equal(explicitWorkloadResult.status, "blocked");
+assert.equal(explicitWorkloadResult.selectedProfile, "headless");
+assert.equal(explicitWorkloadResult.selectedAuthenticationMode, "workload");
+
+const ephemeralContainerDelegated = inspectRuntimeCapabilities(
+  {
+    CONTENTTRAKER_RUNTIME_PROFILE: "container",
+    CONTENTTRAKER_ENVIRONMENT: "staging",
+    CONTENTTRAKER_AUTH_MODE: "delegated",
+    CONTENTTRAKER_CREDENTIAL_STORE: "memory",
+  },
+  facts({
+    platform: "linux",
+    isContainer: true,
+    isCi: true,
+    credentialStoreProvider: "ephemeral-memory",
+    credentialStoreAvailable: true,
+  }),
+);
+assert.equal(ephemeralContainerDelegated.status, "ready");
+assert.equal(ephemeralContainerDelegated.selectedAuthenticationMode, "delegated");
+assert.equal(ephemeralContainerDelegated.selectedStrategy.credentialPersistence, "ephemeral-memory");
 
 const invalidProfile = inspectRuntimeCapabilities(
   delegatedEnv({ CONTENTTRAKER_RUNTIME_PROFILE: "desktop-ish" }),
@@ -187,12 +218,12 @@ const invalidEnvironment = inspectRuntimeCapabilities(
 assert.equal(invalidEnvironment.status, "invalid");
 assert.equal(invalidEnvironment.contentTrakerEnvironment.valid, false);
 
-const missingServiceToken = inspectRuntimeCapabilities(
+const legacyServiceMode = inspectRuntimeCapabilities(
   { CONTENTTRAKER_ENVIRONMENT: "staging", CONTENTTRAKER_AUTH_MODE: "service" },
   facts({ platform: "linux", isContainer: true }),
 );
-assert.equal(missingServiceToken.status, "blocked");
-assert.match(missingServiceToken.diagnostics.join(" "), /environment-specific token is missing/);
+assert.equal(legacyServiceMode.status, "invalid");
+assert.match(legacyServiceMode.diagnostics.join(" "), /Legacy service bearer-token configuration is not supported/);
 
 const invalidAuthMode = inspectRuntimeCapabilities(
   delegatedEnv({ CONTENTTRAKER_AUTH_MODE: "ambient" }),

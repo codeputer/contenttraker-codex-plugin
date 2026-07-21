@@ -4,6 +4,7 @@ The ContentTraker target environment and the plugin host runtime are independent
 
 - `CONTENTTRAKER_ENVIRONMENT` selects `staging` or `production`.
 - `CONTENTTRAKER_RUNTIME_PROFILE` selects how the local adapter evaluates host interaction and credential capabilities.
+- `CONTENTTRAKER_AUTH_MODE` selects `auto`, `delegated`, or `workload` and defaults to `auto`.
 - `CONTENTTRAKER_CREDENTIAL_STORE` selects `auto`, `windows-credential-manager`, `macos-keychain`, `linux-secret-service`, or `memory`.
 - `CONTENTTRAKER_CREDENTIAL_PROFILE` selects the durable delegated-user profile and defaults to `default`.
 
@@ -27,7 +28,7 @@ Host capability inspection is intentionally offline. Call `inspect_contenttraker
 
 The result reports only non-secret facts:
 
-- requested and selected runtime profiles;
+- requested and selected runtime and authentication profiles;
 - the independently selected ContentTraker environment;
 - platform, WSL, container, CI, display, D-Bus, browser-launcher, and secure-store prerequisite facts;
 - authentication, interaction, credential-persistence, and session-restoration capability status;
@@ -41,7 +42,7 @@ Capability status values are:
 - `future`: the provider is part of the cross-platform design but is not implemented in the plugin yet; and
 - `external`: the capability also requires ContentTraker authorization-server or host-platform support.
 
-The tool never returns environment token values, access tokens, refresh tokens, browser state, cookies, keyring contents, or other credentials.
+The tool never returns access tokens, refresh tokens, browser state, cookies, keyring contents, or other credentials.
 
 ## Selection precedence
 
@@ -51,8 +52,9 @@ The tool never returns environment token values, access tokens, refresh tokens, 
 4. With `auto`, prefer a container profile when container evidence exists.
 5. Select an interactive desktop profile only when matching host and browser-launch capability evidence exists.
 6. Select the matching platform credential provider only when its prerequisites are present.
-7. Evaluate `CONTENTTRAKER_AUTH_MODE` against the selected host capabilities.
-8. Return `blocked` or `invalid` rather than silently choosing a weaker authentication or credential-storage strategy.
+7. With authentication `auto`, select workload OAuth for container or CI evidence and delegated OAuth otherwise.
+8. Apply an explicit `delegated` or `workload` override without manufacturing missing capabilities.
+9. Return `blocked` or `invalid` rather than silently choosing a weaker authentication or credential-storage strategy.
 
 Operating-system identity alone is not sufficient evidence of interactivity. Non-WSL Linux desktop selection requires a graphical-session signal and `xdg-open`; container and CI signals suppress automatic desktop selection. Inside WSL, the plugin launches a known Linux browser executable directly when one is available. It never routes WSL authorization through `xdg-open`; when no native browser is found it selects the manual URL provider. Windows browser interoperability remains disabled.
 
@@ -60,6 +62,6 @@ Operating-system identity alone is not sufficient evidence of interactivity. Non
 
 The current branch implements delegated authorization code + PKCE with system-browser, WSL-native, and manual URL interaction providers. Persistent refresh credentials use Windows Credential Manager, macOS Keychain, or Linux Secret Service. They are stored as binding-validated profiles independent of MCP connection/session IDs and can be rediscovered and refreshed by a new task. Explicit `memory` mode is available for ephemeral hosts; production additionally requires `CONTENTTRAKER_ALLOW_EPHEMERAL_PRODUCTION=true`.
 
-Automatic delegated credential persistence is disabled in containers and CI. Those hosts must explicitly choose memory-only behavior or use service authentication until ContentTraker exposes a supported workload-identity grant. Live metadata currently reports device authorization and workload identity as unavailable; both remain external capabilities.
+Automatic delegated credential persistence is disabled in containers and CI. An intentionally interactive ephemeral container may explicitly select `CONTENTTRAKER_AUTH_MODE=delegated` and `CONTENTTRAKER_CREDENTIAL_STORE=memory`; it must authorize again after restart. Automatic container/CI selection uses workload OAuth and currently reports blocked because ContentTraker exposes no supported workload grant and the plugin has no host workload provider.
 
-Service mode currently reports ready only when the selected ContentTraker environment has its matching service token configured. The diagnostic reports presence only and never returns the token.
+Raw bearer-token and legacy `service` configuration are unsupported. `service` and unknown authentication modes return `invalid` with a migration diagnostic. Live metadata currently reports device authorization and workload OAuth as unavailable; both remain external capabilities.
