@@ -4,6 +4,7 @@
 
 - Records Richard Reukema (`richard@phoenixbussolutions.com`) as the repository creator and release-publishing identity.
 - Clarifies that consuming-host ContentTraker identities remain external runtime policy inputs and are never plugin defaults.
+- Classifies bundled libraries as build-only dependencies; marketplace installations run the reviewed self-contained adapter bundle and do not install the SDK's unused HTTP/static-server dependency tree.
 
 ## 0.1.1 - 2026-07-21
 
