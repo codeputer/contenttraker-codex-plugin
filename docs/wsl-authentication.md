@@ -44,7 +44,7 @@ The default credential profile is `default`. Set `CONTENTTRAKER_CREDENTIAL_PROFI
 
 If URL launch, loopback callback, native keyring loading, keyring access, token validation, `GET /me`, or host identity matching fails, the plugin stops at that layer. Do not work around the failure with a copied token, a committed credential, a desktop connector session, or a plaintext token cache.
 
-The current ContentTraker OAuth metadata advertises authorization-code and refresh-token grants. It does not advertise a device endpoint or OAuth device-code grant. The plugin-side provider is ready, but a host that cannot open the displayed URL and route the callback to its loopback listener remains blocked until the authorization server publishes device authorization or another supported flow.
+The current staging ContentTraker OAuth metadata advertises authorization-code and refresh-token grants. It does not advertise a device endpoint or OAuth device-code grant. The plugin-side provider is ready, but a host that cannot open the displayed URL and route the callback to its loopback listener remains blocked until the authorization server publishes device authorization or another supported flow.
 
 ## Host identity check
 
