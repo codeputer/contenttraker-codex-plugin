@@ -17,9 +17,16 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 18
           cache: npm
           cache-dependency-path: plugins/contenttraker/package-lock.json
       - run: npm ci
+      - run: npm audit --omit=dev
       - run: npm test
       - run: git diff --exit-code -- dist/server.mjs package-lock.json
+      - name: Verify unused HTTP server is absent from release bundle
+        run: |
+          if grep -Eiq '@hono/node-server|serve-static|serveStatic' dist/server.mjs; then
+            echo 'Unused HTTP/static-server code was included in the release bundle.'
+            exit 1
+          fi

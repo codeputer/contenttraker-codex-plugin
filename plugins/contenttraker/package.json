@@ -1,6 +1,6 @@
 {
   "name": "contenttraker",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -10,14 +10,12 @@
     "auth-concurrency": "tsc --noEmit -p tsconfig.tests.json && esbuild tests/auth-concurrency.ts --bundle --platform=node --format=esm --target=node18 --outfile=node_modules/.cache/contenttraker-auth-concurrency.mjs && node node_modules/.cache/contenttraker-auth-concurrency.mjs",
     "test": "npm run smoke && npm run auth-concurrency"
   },
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0",
-    "zod": "^3.25.76"
-  },
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@types/node": "^24.0.0",
     "esbuild": "^0.25.0",
     "selfsigned": "^5.5.0",
-    "typescript": "^5.8.0"
+    "typescript": "^5.8.0",
+    "zod": "^3.25.76"
   }
 }

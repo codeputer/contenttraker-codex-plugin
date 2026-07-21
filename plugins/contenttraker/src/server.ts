@@ -22,7 +22,7 @@ const securityContextFactory = new ContentTrakerSecurityContextFactory();
 
 const server = new McpServer({
   name: "contenttraker",
-  version: "0.1.1",
+  version: "0.1.2",
 });
 
 server.registerTool(

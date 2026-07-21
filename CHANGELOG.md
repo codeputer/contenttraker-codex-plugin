@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.2 - 2026-07-21
+
+- Records Richard Reukema (`richard@phoenixbussolutions.com`) as the repository creator and release-publishing identity.
+- Clarifies that consuming-host ContentTraker identities remain external runtime policy inputs and are never plugin defaults.
+- Classifies bundled libraries as build-only dependencies; marketplace installations run the reviewed self-contained adapter bundle and do not install the SDK's unused HTTP/static-server dependency tree.
+- Adds CI enforcement and security documentation for the build-time versus shipped-runtime dependency boundary.
+
 ## 0.1.1 - 2026-07-21
 
 - Makes the WSL runtime self-contained by using Linux Secret Service through `secret-tool`; no `npm` or native Node keyring package is required after marketplace installation.
