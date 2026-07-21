@@ -1,8 +1,14 @@
 import { createHash } from "node:crypto";
 
 import { resolveAdapterEnvironment } from "./environment-profile.js";
-import { createCredentialHandle, OsKeyringCredentialStore, type SecureCredentialStore } from "./credential-store.js";
 import {
+  createCredentialHandle,
+  createSecureCredentialStore,
+  withCredentialStoreLock,
+  type SecureCredentialStore,
+} from "./credential-store.js";
+import {
+  CONTENTTRAKER_OAUTH_CLIENT_ID,
   ContentTrakerOAuthClient,
   type OAuthAuthorizationSession,
   type OAuthTokenResponse,
@@ -53,6 +59,7 @@ export interface ContentTrakerTokenProvider {
 
 interface CachedCredential {
   cacheKey: string;
+  credentialProfile: string;
   accessToken: string;
   authorityIssuer: string;
   tokenIssuer: string;
@@ -61,6 +68,29 @@ interface CachedCredential {
   expiresAt: number;
   credentialHandle: string;
   credentialVersion: string;
+}
+
+interface CredentialBinding {
+  profile: string;
+  handle: string;
+  environment: string;
+  authorityIssuer: string;
+  audience: string;
+  clientId: string;
+}
+
+interface StoredDelegatedCredential {
+  version: 1;
+  profile: string;
+  environment: string;
+  authorityIssuer: string;
+  tokenIssuer: string;
+  audience: string;
+  clientId: string;
+  subjectId: string;
+  refreshToken: string;
+  revision: string;
+  updatedAt: string;
 }
 
 interface EffectiveCaller {
@@ -77,7 +107,7 @@ interface DelegatedAuthorizationFlow {
 
 export function createContentTrakerTokenProvider(
   env: NodeJS.ProcessEnv = process.env,
-  credentialStore: SecureCredentialStore = new OsKeyringCredentialStore(),
+  credentialStore: SecureCredentialStore = createSecureCredentialStore(env),
   oauthClient?: ContentTrakerOAuthClient,
 ): ContentTrakerTokenProvider {
   const mode = (env.CONTENTTRAKER_AUTH_MODE?.trim().toLowerCase() || "delegated");
@@ -99,7 +129,9 @@ export function createContentTrakerTokenProvider(
 export class DelegatedContentTrakerTokenProvider implements ContentTrakerTokenProvider {
   private readonly credentialsBySession = new Map<string, CachedCredential>();
   private readonly loginFlights = new Map<string, Promise<CachedCredential>>();
+  private readonly restorationFlights = new Map<string, Promise<CachedCredential | undefined>>();
   private readonly refreshFlights = new Map<string, Promise<CachedCredential>>();
+  private readonly credentialMutationTails = new Map<string, Promise<void>>();
   private readonly effectiveCallers = new Map<string, EffectiveCaller>();
   private readonly authorizationFlows = new Map<string, DelegatedAuthorizationFlow>();
 
@@ -111,15 +143,19 @@ export class DelegatedContentTrakerTokenProvider implements ContentTrakerTokenPr
 
   getStatus(context?: ContentTrakerRequestSecurityContext): TokenStrategyStatus {
     const credential = context ? this.credentialsBySession.get(sessionKey(context)) : undefined;
+    const binding = context ? resolveCredentialBinding(context, this.env) : undefined;
     return {
       mode: "delegated-user-pkce",
       configured: Boolean(resolveAdapterEnvironment(this.env).oauthIssuer),
       accessTokenPresent: Boolean(credential),
       source: "contenttraker-oauth-pkce",
       environmentTokenIgnored: hasAnyEnvironmentToken(this.env),
-      credentialStore: "os-keyring",
+      credentialStore: this.credentialStore.provider ?? "custom",
+      credentialProfile: binding?.profile,
+      crossTaskRestoration: Boolean(this.credentialStore.persistent),
       authenticationPending: context
         ? this.loginFlights.has(sessionKey(context))
+          || this.restorationFlights.has(binding?.handle ?? "")
           || this.authorizationFlows.get(sessionKey(context))?.status === "pending"
         : false,
       subjectId: credential?.subjectId,
@@ -162,9 +198,23 @@ export class DelegatedContentTrakerTokenProvider implements ContentTrakerTokenPr
   async beginAuthorization(context: ContentTrakerRequestSecurityContext): Promise<AuthorizationFlowResult> {
     this.assertContextMatchesProfile(context);
     const key = sessionKey(context);
-    const credential = this.credentialsBySession.get(key);
+    let credential = this.credentialsBySession.get(key);
     if (credential && expiryStatus(credential.expiresAt) === "valid") {
       return { status: "authorized", interaction: interaction(this.oauthClient), diagnostics: [] };
+    }
+
+    try {
+      credential = await this.restoreSingleFlight(context);
+      if (credential) {
+        this.credentialsBySession.set(key, credential);
+        return { status: "authorized", interaction: interaction(this.oauthClient), diagnostics: [] };
+      }
+    } catch (error) {
+      return {
+        status: "blocked",
+        interaction: interaction(this.oauthClient),
+        diagnostics: [credentialFailure(error)],
+      };
     }
 
     const existing = this.authorizationFlows.get(key);
@@ -215,7 +265,22 @@ export class DelegatedContentTrakerTokenProvider implements ContentTrakerTokenPr
     }
 
     const flow = this.authorizationFlows.get(sessionKey(context));
-    if (!flow) return { status: "idle", interaction: interaction(this.oauthClient), diagnostics: [] };
+    if (!flow) {
+      try {
+        const restored = await this.restoreSingleFlight(context);
+        if (restored) {
+          this.credentialsBySession.set(sessionKey(context), restored);
+          return { status: "authorized", interaction: interaction(this.oauthClient), diagnostics: [] };
+        }
+        return { status: "idle", interaction: interaction(this.oauthClient), diagnostics: [] };
+      } catch (error) {
+        return {
+          status: "blocked",
+          interaction: interaction(this.oauthClient),
+          diagnostics: [credentialFailure(error)],
+        };
+      }
+    }
 
     const boundedWait = Math.max(0, Math.min(waitMilliseconds, 15_000));
     if (flow.status === "pending" && boundedWait > 0) {
@@ -260,6 +325,8 @@ export class DelegatedContentTrakerTokenProvider implements ContentTrakerTokenPr
       requestId: context.requestId,
       authenticatedSubjectId: caller?.subjectId ?? credential?.subjectId,
       credentialHandle: credential?.credentialHandle,
+      credentialProfile: credential?.credentialProfile ?? resolveCredentialBinding(context, this.env).profile,
+      credentialStore: this.credentialStore.provider ?? "custom",
       tokenAudience: context.tokenAudience,
       tokenExpiryStatus: expiryStatus(credential?.expiresAt),
       tokenExpiresAt: credential ? new Date(credential.expiresAt * 1000).toISOString() : undefined,
@@ -283,15 +350,19 @@ export class DelegatedContentTrakerTokenProvider implements ContentTrakerTokenPr
 
   async invalidate(context: ContentTrakerRequestSecurityContext): Promise<void> {
     const key = sessionKey(context);
-    const credential = this.credentialsBySession.get(key);
-    this.credentialsBySession.delete(key);
-    this.effectiveCallers.delete(key);
-    const flow = this.authorizationFlows.get(key);
-    this.authorizationFlows.delete(key);
-    if (flow?.status === "pending") await flow.session.cancel().catch(() => undefined);
-    if (credential) {
-      await this.credentialStore.delete(credential.credentialHandle);
-    }
+    const handle = this.credentialsBySession.get(key)?.credentialHandle
+      ?? resolveCredentialBinding(context, this.env).handle;
+    this.credentialsBySession.clear();
+    this.effectiveCallers.clear();
+    const flows = [...this.authorizationFlows.values()];
+    this.authorizationFlows.clear();
+    await Promise.all(flows
+      .filter((flow) => flow.status === "pending")
+      .map(async (flow) => await flow.session.cancel().catch(() => undefined)));
+    await this.withCredentialMutation(
+      handle,
+      async () => await this.withCrossProcessLock(handle, async () => await this.credentialStore.delete(handle)),
+    );
   }
 
   private async loginSingleFlight(
@@ -300,20 +371,63 @@ export class DelegatedContentTrakerTokenProvider implements ContentTrakerTokenPr
   ): Promise<CachedCredential> {
     const key = sessionKey(context);
     const existing = this.loginFlights.get(key);
-    if (existing) return await existing;
+    if (existing) {
+      const credential = await existing;
+      this.credentialsBySession.set(key, credential);
+      return credential;
+    }
 
     const authorizationFlow = this.authorizationFlows.get(key);
     if (authorizationFlow?.status === "pending") return await authorizationFlow.completion;
 
     const flight = (async () => {
+      const restored = await this.restoreSingleFlight(context);
+      if (restored) return restored;
       const tokenResponse = await this.oauthClient.authorize(context, signal);
-      const credential = await this.createCredential(context, tokenResponse);
-      this.credentialsBySession.set(key, credential);
-      return credential;
+      return await this.createCredential(context, tokenResponse);
     })().finally(() => this.loginFlights.delete(key));
 
     this.loginFlights.set(key, flight);
+    const credential = await flight;
+    this.credentialsBySession.set(key, credential);
+    return credential;
+  }
+
+  private async restoreSingleFlight(
+    context: ContentTrakerRequestSecurityContext,
+  ): Promise<CachedCredential | undefined> {
+    const binding = resolveCredentialBinding(context, this.env);
+    const existing = this.restorationFlights.get(binding.handle);
+    if (existing) return await existing;
+
+    const flight = this.restoreCredential(context, binding)
+      .finally(() => this.restorationFlights.delete(binding.handle));
+    this.restorationFlights.set(binding.handle, flight);
     return await flight;
+  }
+
+  private async restoreCredential(
+    context: ContentTrakerRequestSecurityContext,
+    binding: CredentialBinding,
+  ): Promise<CachedCredential | undefined> {
+    return await this.withCredentialMutation(
+      binding.handle,
+      async () => await this.withCrossProcessLock(binding.handle, async () => {
+        const storedValue = await this.credentialStore.get(binding.handle);
+        if (!storedValue) return undefined;
+
+        let stored: StoredDelegatedCredential;
+        try {
+          stored = parseStoredCredential(storedValue, binding);
+        } catch (error) {
+          await this.credentialStore.delete(binding.handle).catch(() => undefined);
+          throw error;
+        }
+
+        const response = await this.refreshWithRotationRecovery(context, binding, storedValue, stored);
+        return await this.createCredential(context, response, stored.subjectId, stored.tokenIssuer, true);
+      }),
+    );
   }
 
   private async refreshSingleFlight(
@@ -321,34 +435,60 @@ export class DelegatedContentTrakerTokenProvider implements ContentTrakerTokenPr
     credential: CachedCredential,
   ): Promise<CachedCredential> {
     const existing = this.refreshFlights.get(credential.cacheKey);
-    if (existing) return await existing;
+    if (existing) {
+      const refreshed = await existing;
+      this.credentialsBySession.set(sessionKey(context), refreshed);
+      return refreshed;
+    }
 
     const flight = (async () => {
-      const refreshToken = await this.credentialStore.get(credential.credentialHandle);
-      if (!refreshToken) {
-        throw new Error("ContentTraker refresh credential is unavailable in the OS keyring.");
-      }
-
-      const tokenResponse = await this.oauthClient.refresh(refreshToken, context);
-      const refreshed = await this.createCredential(context, tokenResponse, credential.subjectId);
-      this.credentialsBySession.set(sessionKey(context), refreshed);
-      if (refreshed.credentialHandle !== credential.credentialHandle) {
-        await this.credentialStore.delete(credential.credentialHandle);
-      }
-      return refreshed;
-    })().catch(async (error) => {
-      await this.invalidate(context);
-      throw error;
-    }).finally(() => this.refreshFlights.delete(credential.cacheKey));
+      const binding = resolveCredentialBinding(context, this.env);
+      return await this.withCredentialMutation(
+        binding.handle,
+        async () => await this.withCrossProcessLock(binding.handle, async () => {
+          const storedValue = await this.credentialStore.get(binding.handle);
+          if (!storedValue) throw new Error("ContentTraker refresh credential is unavailable in the selected credential store.");
+          const stored = parseStoredCredential(storedValue, binding, credential.subjectId);
+          const tokenResponse = await this.refreshWithRotationRecovery(context, binding, storedValue, stored);
+          return await this.createCredential(
+            context,
+            tokenResponse,
+            credential.subjectId,
+            stored.tokenIssuer,
+            true,
+          );
+        }),
+      );
+    })().finally(() => this.refreshFlights.delete(credential.cacheKey));
 
     this.refreshFlights.set(credential.cacheKey, flight);
-    return await flight;
+    const refreshed = await flight;
+    this.credentialsBySession.set(sessionKey(context), refreshed);
+    return refreshed;
+  }
+
+  private async refreshWithRotationRecovery(
+    context: ContentTrakerRequestSecurityContext,
+    binding: CredentialBinding,
+    storedValue: string,
+    stored: StoredDelegatedCredential,
+  ): Promise<OAuthTokenResponse> {
+    try {
+      return await this.oauthClient.refresh(stored.refreshToken, context);
+    } catch (error) {
+      const latestValue = await this.credentialStore.get(binding.handle);
+      if (!latestValue || latestValue === storedValue) throw error;
+      const latest = parseStoredCredential(latestValue, binding, stored.subjectId);
+      return await this.oauthClient.refresh(latest.refreshToken, context);
+    }
   }
 
   private async createCredential(
     context: ContentTrakerRequestSecurityContext,
     response: OAuthTokenResponse,
     expectedSubjectId?: string,
+    expectedTokenIssuer?: string,
+    lockHeld = false,
   ): Promise<CachedCredential> {
     const profile = resolveAdapterEnvironment(this.env);
     if (!profile.oauthIssuer || response.resource !== context.tokenAudience) {
@@ -359,29 +499,72 @@ export class DelegatedContentTrakerTokenProvider implements ContentTrakerTokenPr
     if (expectedSubjectId && claims.subjectId !== expectedSubjectId) {
       throw new Error("ContentTraker token refresh changed the authenticated subject.");
     }
+    if (expectedTokenIssuer && claims.tokenIssuer !== expectedTokenIssuer) {
+      throw new Error("ContentTraker token refresh changed the credential token issuer.");
+    }
 
-    const cacheKey = [
-      context.environment,
-      profile.oauthIssuer,
-      claims.tokenIssuer,
-      claims.subjectId,
-      context.connectionId,
-      context.sessionId,
-    ].join("|");
-    const credentialHandle = createCredentialHandle(cacheKey);
-    await this.credentialStore.set(credentialHandle, response.refreshToken);
+    const binding = resolveCredentialBinding(context, this.env);
+    const persist = async (): Promise<CachedCredential> => {
+      const existingValue = await this.credentialStore.get(binding.handle);
+      if (existingValue) {
+        const existing = parseStoredCredential(existingValue, binding);
+        if (existing.subjectId !== claims.subjectId) {
+          throw new Error("The configured ContentTraker credential profile is already bound to a different subject.");
+        }
+      }
 
-    return Object.freeze({
-      cacheKey,
-      accessToken: response.accessToken,
-      authorityIssuer: profile.oauthIssuer,
-      tokenIssuer: claims.tokenIssuer,
-      subjectId: claims.subjectId,
-      audience: context.tokenAudience,
-      expiresAt: claims.expiresAt,
-      credentialHandle,
-      credentialVersion: createHash("sha256").update(response.accessToken).digest("hex"),
-    });
+      const stored: StoredDelegatedCredential = {
+        version: 1,
+        profile: binding.profile,
+        environment: binding.environment,
+        authorityIssuer: binding.authorityIssuer,
+        tokenIssuer: claims.tokenIssuer,
+        audience: binding.audience,
+        clientId: binding.clientId,
+        subjectId: claims.subjectId,
+        refreshToken: response.refreshToken,
+        revision: createHash("sha256").update(response.refreshToken).digest("hex"),
+        updatedAt: new Date().toISOString(),
+      };
+      await this.credentialStore.set(binding.handle, JSON.stringify(stored));
+
+      return Object.freeze({
+        cacheKey: `${binding.handle}|${claims.subjectId}`,
+        credentialProfile: binding.profile,
+        accessToken: response.accessToken,
+        authorityIssuer: binding.authorityIssuer,
+        tokenIssuer: claims.tokenIssuer,
+        subjectId: claims.subjectId,
+        audience: context.tokenAudience,
+        expiresAt: claims.expiresAt,
+        credentialHandle: binding.handle,
+        credentialVersion: createHash("sha256").update(response.accessToken).digest("hex"),
+      });
+    };
+
+    if (lockHeld) return await persist();
+    return await this.withCredentialMutation(
+      binding.handle,
+      async () => await this.withCrossProcessLock(binding.handle, persist),
+    );
+  }
+
+  private async withCredentialMutation<T>(handle: string, action: () => Promise<T>): Promise<T> {
+    const previous = this.credentialMutationTails.get(handle) ?? Promise.resolve();
+    const result = previous.catch(() => undefined).then(action);
+    const tail = result.then(() => undefined, () => undefined);
+    this.credentialMutationTails.set(handle, tail);
+    try {
+      return await result;
+    } finally {
+      if (this.credentialMutationTails.get(handle) === tail) this.credentialMutationTails.delete(handle);
+    }
+  }
+
+  private async withCrossProcessLock<T>(handle: string, action: () => Promise<T>): Promise<T> {
+    return this.credentialStore.persistent
+      ? await withCredentialStoreLock(handle, action)
+      : await action();
   }
 
   private assertContextMatchesProfile(context: ContentTrakerRequestSecurityContext): void {
@@ -568,6 +751,76 @@ function hasAnyEnvironmentToken(env: NodeJS.ProcessEnv): boolean {
   );
 }
 
+function resolveCredentialBinding(
+  context: ContentTrakerRequestSecurityContext,
+  env: NodeJS.ProcessEnv,
+): CredentialBinding {
+  const configuredProfile = env.CONTENTTRAKER_CREDENTIAL_PROFILE?.trim() || "default";
+  if (!/^[a-z0-9][a-z0-9._-]{0,63}$/iu.test(configuredProfile)) {
+    throw new Error(
+      "CONTENTTRAKER_CREDENTIAL_PROFILE must be 1-64 letters, numbers, dots, underscores, or hyphens.",
+    );
+  }
+  const profile = configuredProfile.toLowerCase();
+
+  const environment = resolveAdapterEnvironment(env);
+  if (!environment.oauthIssuer) {
+    throw new Error("ContentTraker OAuth issuer configuration is unavailable for the credential profile.");
+  }
+
+  const bindingKey = [
+    "v1",
+    context.environment,
+    environment.oauthIssuer,
+    context.tokenAudience,
+    CONTENTTRAKER_OAUTH_CLIENT_ID,
+    profile,
+  ].join("|");
+  return {
+    profile,
+    handle: createCredentialHandle(bindingKey),
+    environment: context.environment,
+    authorityIssuer: environment.oauthIssuer,
+    audience: context.tokenAudience,
+    clientId: CONTENTTRAKER_OAUTH_CLIENT_ID,
+  };
+}
+
+function parseStoredCredential(
+  value: string,
+  binding: CredentialBinding,
+  expectedSubjectId?: string,
+): StoredDelegatedCredential {
+  let candidate: Partial<StoredDelegatedCredential>;
+  try {
+    candidate = JSON.parse(value) as Partial<StoredDelegatedCredential>;
+  } catch {
+    throw new Error("The stored ContentTraker credential record is malformed.");
+  }
+
+  const bindingMatches = candidate.version === 1
+    && candidate.profile === binding.profile
+    && candidate.environment === binding.environment
+    && candidate.authorityIssuer === binding.authorityIssuer
+    && candidate.audience === binding.audience
+    && candidate.clientId === binding.clientId;
+  const requiredValuesPresent = typeof candidate.tokenIssuer === "string" && candidate.tokenIssuer.length > 0
+    && typeof candidate.subjectId === "string" && candidate.subjectId.length > 0
+    && typeof candidate.refreshToken === "string" && candidate.refreshToken.length > 0
+    && typeof candidate.revision === "string" && candidate.revision.length > 0
+    && typeof candidate.updatedAt === "string" && Number.isFinite(Date.parse(candidate.updatedAt));
+  const revisionMatches = typeof candidate.refreshToken === "string"
+    && typeof candidate.revision === "string"
+    && createHash("sha256").update(candidate.refreshToken).digest("hex") === candidate.revision;
+  if (!bindingMatches || !requiredValuesPresent || !revisionMatches) {
+    throw new Error("The stored ContentTraker credential binding is invalid.");
+  }
+  if (expectedSubjectId && candidate.subjectId !== expectedSubjectId) {
+    throw new Error("The stored ContentTraker credential belongs to a different subject.");
+  }
+  return candidate as StoredDelegatedCredential;
+}
+
 function sessionKey(context: ContentTrakerRequestSecurityContext): string {
   return `${context.environment}|${context.connectionId}|${context.sessionId}`;
 }
@@ -622,6 +875,23 @@ function authorizationFailure(error: unknown): {
     };
   }
   return { status: "failed", diagnostic: "ContentTraker delegated authorization failed." };
+}
+
+function credentialFailure(error: unknown): string {
+  const message = error instanceof Error ? error.message.toLowerCase() : "";
+  if (message.includes("credential profile") && message.includes("different subject")) {
+    return "The configured ContentTraker credential profile is already bound to a different subject.";
+  }
+  if (message.includes("subject") || message.includes("token issuer")) {
+    return "The restored ContentTraker credential changed its durable subject or token issuer and was rejected.";
+  }
+  if (message.includes("credential binding") || message.includes("credential record")) {
+    return "The stored ContentTraker credential failed binding validation and cannot be restored.";
+  }
+  if (message.includes("credential") || message.includes("keychain") || message.includes("secret service")) {
+    return "ContentTraker credential restoration is unavailable through the selected secure provider.";
+  }
+  return "ContentTraker credential restoration failed before interactive authorization could begin.";
 }
 
 function interaction(

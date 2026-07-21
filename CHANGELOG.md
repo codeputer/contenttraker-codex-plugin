@@ -7,6 +7,9 @@
 - Adds platform browser, WSL-native browser, and manual authorization URL providers selected by `CONTENTTRAKER_BROWSER_MODE`.
 - Adds begin, bounded status, and cancel tools for connection-scoped authorization while keeping OAuth codes, verifiers, access tokens, and refresh credentials internal.
 - Disables `xdg-open` and Windows browser interoperability inside WSL; WSL either launches a known Linux browser directly or returns a manual URL while retaining the loopback listener.
+- Adds capability-probed Windows Credential Manager, macOS Keychain, Linux Secret Service, and explicitly selected ephemeral-memory credential providers.
+- Replaces connection/session-derived keyring handles with binding-validated durable profiles and restores rotating refresh credentials in new tasks.
+- Serializes refresh rotation across adapter processes with metadata-free temporary locks and adds confirmed local credential deletion.
 
 ## 0.1.2 - 2026-07-21
 

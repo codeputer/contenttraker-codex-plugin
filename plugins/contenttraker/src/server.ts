@@ -126,6 +126,64 @@ server.registerTool(
 );
 
 server.registerTool(
+  "forget_contenttraker_credential",
+  {
+    title: "Forget ContentTraker Credential",
+    description:
+      "Delete the configured delegated credential profile from the selected secure store and clear its in-process authorization state. This does not revoke a credential at the authorization server.",
+    inputSchema: {
+      confirmation: z.literal("FORGET_CONTENTTRAKER_CREDENTIAL"),
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  },
+  async (_input, extra) => {
+    const context = securityContextFactory.create(extra);
+    const before = tokenProvider.getStatus(context);
+    if (before.mode !== "delegated-user-pkce") {
+      const result = {
+        status: "blocked",
+        diagnostics: ["Local delegated credential deletion is unavailable in service or invalid authentication mode."],
+      };
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+        structuredContent: result,
+      };
+    }
+
+    try {
+      await tokenProvider.invalidate(context);
+      const result = {
+        status: "forgotten",
+        credentialProfile: before.credentialProfile,
+        credentialStore: before.credentialStore,
+        serverAuthorizationRevoked: false,
+        diagnostics: ["The local credential was deleted. Use the ContentTraker account security workflow for server-side revocation."],
+      };
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+        structuredContent: result,
+      };
+    } catch {
+      const result = {
+        status: "blocked",
+        credentialProfile: before.credentialProfile,
+        credentialStore: before.credentialStore,
+        diagnostics: ["The selected secure credential provider could not delete the local ContentTraker profile."],
+      };
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+        structuredContent: result,
+      };
+    }
+  },
+);
+
+server.registerTool(
   "get_current_user",
   {
     title: "Get Authenticated ContentTraker User",

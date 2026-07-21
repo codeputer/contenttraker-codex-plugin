@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { resolveBrowserInteraction } from "./browser-interaction.js";
+import { resolveCredentialStore } from "./credential-store.js";
 import { resolveAdapterEnvironment } from "./environment-profile.js";
 import type {
   RuntimeCapabilitiesResult,
@@ -35,6 +36,8 @@ export function inspectRuntimeCapabilities(
 ): RuntimeCapabilitiesResult {
   const environmentProfile = resolveAdapterEnvironment(env);
   const configuredProfile = env.CONTENTTRAKER_RUNTIME_PROFILE?.trim().toLowerCase() || "auto";
+  const configuredCredentialProfile = env.CONTENTTRAKER_CREDENTIAL_PROFILE?.trim() || "default";
+  const validCredentialProfile = /^[a-z0-9][a-z0-9._-]{0,63}$/iu.test(configuredCredentialProfile);
   const diagnostics: string[] = [];
   const validRequestedProfile = isRuntimeProfile(configuredProfile);
   const requestedProfile = validRequestedProfile ? configuredProfile : "invalid";
@@ -54,6 +57,12 @@ export function inspectRuntimeCapabilities(
     );
   }
 
+  if (!validCredentialProfile) {
+    diagnostics.push(
+      "CONTENTTRAKER_CREDENTIAL_PROFILE must be 1-64 letters, numbers, dots, underscores, or hyphens.",
+    );
+  }
+
   if (selectedProfile) {
     diagnostics.push(...validateExplicitProfile(configuredProfile, selectedProfile, host));
   }
@@ -62,7 +71,7 @@ export function inspectRuntimeCapabilities(
   const serviceTokenConfigured = hasEnvironmentServiceToken(env, environmentProfile.status.name);
   const delegatedInteractionReady = host.browserInteractionMode !== "invalid";
   const delegatedReady = delegatedInteractionReady
-    && host.linuxSecretServicePrerequisitesAvailable;
+    && host.credentialStoreAvailable;
   const serviceReady = authMode === "service" && serviceTokenConfigured;
 
   const interaction: RuntimeCapability[] = [
@@ -121,33 +130,45 @@ export function inspectRuntimeCapabilities(
   const credentialPersistence: RuntimeCapability[] = [
     capability(
       "linux-secret-service",
-      host.linuxSecretServicePrerequisitesAvailable ? "available" : "blocked",
-      host.linuxSecretServicePrerequisitesAvailable
+      host.credentialStoreProvider === "linux-secret-service" && host.credentialStoreAvailable ? "available" : "blocked",
+      host.credentialStoreProvider === "linux-secret-service" && host.credentialStoreAvailable
         ? "Provider availability and unlocked state are verified when a keyring operation runs."
         : linuxSecretServiceBlockedReason(host),
     ),
     capability(
       "windows-credential-manager",
-      "future",
-      "The Windows Credential Manager provider is not implemented yet.",
+      host.credentialStoreProvider === "windows-credential-manager" && host.credentialStoreAvailable ? "available" : "blocked",
+      host.credentialStoreProvider === "windows-credential-manager" && host.credentialStoreAvailable
+        ? "Credential operations use the native Windows Credential Manager API through a secret-safe PowerShell bridge."
+        : host.platform === "windows"
+          ? host.credentialStoreDiagnostics[0]
+          : "Windows Credential Manager is not applicable to this host platform.",
     ),
     capability(
       "macos-keychain",
-      "future",
-      "The macOS Keychain provider is not implemented yet.",
+      host.credentialStoreProvider === "macos-keychain" && host.credentialStoreAvailable ? "available" : "blocked",
+      host.credentialStoreProvider === "macos-keychain" && host.credentialStoreAvailable
+        ? "Credential operations use the macOS security command without passing secret values in process arguments."
+        : host.platform === "macos"
+          ? host.credentialStoreDiagnostics[0]
+          : "macOS Keychain is not applicable to this host platform.",
     ),
     capability(
       "ephemeral-memory",
-      "future",
-      "An explicit production memory-only credential profile is not implemented yet.",
+      host.credentialStoreProvider === "ephemeral-memory" && host.credentialStoreAvailable ? "available" : "blocked",
+      host.credentialStoreProvider === "ephemeral-memory" && host.credentialStoreAvailable
+        ? "Explicit memory-only credentials are selected; a new task must authorize again."
+        : "Set CONTENTTRAKER_CREDENTIAL_STORE=memory to explicitly select non-persistent delegated credentials.",
     ),
   ];
 
   const sessionRestoration: RuntimeCapability[] = [
     capability(
       "cross-task-refresh-restoration",
-      "future",
-      "Persistent refresh credentials are currently keyed to the MCP connection and session.",
+      host.credentialStoreAvailable && host.credentialStorePersistent ? "available" : "blocked",
+      host.credentialStoreAvailable && host.credentialStorePersistent
+        ? "Refresh credentials use a discoverable, binding-validated credential profile independent of MCP connection and session IDs."
+        : "Cross-task restoration requires a persistent secure credential provider.",
     ),
   ];
 
@@ -155,6 +176,7 @@ export function inspectRuntimeCapabilities(
     ? {
         authentication: "service-environment-token" as const,
         interaction: "none" as const,
+        credentialProfile: configuredCredentialProfile.toLowerCase(),
         credentialPersistence: serviceTokenConfigured
           ? "environment-service-token" as const
           : "none" as const,
@@ -164,14 +186,18 @@ export function inspectRuntimeCapabilities(
       ? {
           authentication: "delegated-user-pkce" as const,
           interaction: host.browserInteractionMode === "invalid" ? "none" as const : host.browserInteractionMode,
-          credentialPersistence: host.linuxSecretServicePrerequisitesAvailable
-            ? "linux-secret-service" as const
+          credentialProfile: configuredCredentialProfile.toLowerCase(),
+          credentialPersistence: host.credentialStoreAvailable
+            ? host.credentialStoreProvider === "unavailable"
+              ? "none" as const
+              : host.credentialStoreProvider
             : "none" as const,
-          crossTaskRestoration: false,
+          crossTaskRestoration: host.credentialStoreAvailable && host.credentialStorePersistent,
         }
       : {
           authentication: "invalid" as const,
           interaction: "none" as const,
+          credentialProfile: configuredCredentialProfile.toLowerCase(),
           credentialPersistence: "none" as const,
           crossTaskRestoration: false,
         };
@@ -186,6 +212,7 @@ export function inspectRuntimeCapabilities(
 
   const invalid = !validRequestedProfile
     || !environmentProfile.status.valid
+    || !validCredentialProfile
     || authMode !== "delegated" && authMode !== "service"
     || diagnostics.some((entry) => entry.startsWith("Explicit runtime profile"));
   const ready = !invalid && (authMode === "delegated" ? delegatedReady : serviceReady);
@@ -241,6 +268,7 @@ export function detectRuntimeHostFacts(
     || browserSelection.mode === "wsl-native";
   const linuxSecretToolAvailable = platform === "linux" && commandAvailable("secret-tool");
   const dbusSessionAvailable = platform === "linux" && Boolean(env.DBUS_SESSION_BUS_ADDRESS?.trim());
+  const credentialStore = resolveCredentialStore(env, { platform, commandAvailable });
 
   return {
     platform: platform === "win32"
@@ -260,6 +288,10 @@ export function detectRuntimeHostFacts(
     wslNativeBrowserIsolationAvailable: browserSelection.mode === "wsl-native",
     linuxSecretToolAvailable,
     linuxSecretServicePrerequisitesAvailable: linuxSecretToolAvailable && dbusSessionAvailable,
+    credentialStoreProvider: credentialStore.provider,
+    credentialStoreAvailable: credentialStore.available,
+    credentialStorePersistent: credentialStore.persistent,
+    credentialStoreDiagnostics: credentialStore.diagnostics,
   };
 }
 
@@ -309,10 +341,9 @@ function delegatedBlockedReason(host: RuntimeHostFacts): string {
   if (host.browserInteractionMode === "invalid") {
     return "Delegated PKCE authentication is blocked because browser interaction configuration is invalid.";
   }
-  if (!host.linuxSecretServicePrerequisitesAvailable) {
-    return host.platform === "linux"
-      ? linuxSecretServiceBlockedReason(host)
-      : `Delegated PKCE authentication is blocked because the ${platformLabel(host.platform)} secure credential provider is not implemented yet.`;
+  if (!host.credentialStoreAvailable) {
+    return host.credentialStoreDiagnostics[0]
+      ?? `Delegated PKCE authentication is blocked because no ${platformLabel(host.platform)} secure credential provider is available.`;
   }
   return "Delegated PKCE authentication is blocked by unavailable host capabilities.";
 }

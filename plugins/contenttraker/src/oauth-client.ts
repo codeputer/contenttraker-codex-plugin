@@ -4,7 +4,7 @@ import { createServer } from "node:http";
 import { createBrowserLauncher, type BrowserInteractionMode, type BrowserLauncher } from "./browser-interaction.js";
 import type { ContentTrakerRequestSecurityContext } from "./types.js";
 
-const CLIENT_ID = "codex-mcp";
+export const CONTENTTRAKER_OAUTH_CLIENT_ID = "codex-mcp";
 const DEFAULT_SCOPES = [
   "workspaces:read",
   "workspaces:write",
@@ -76,7 +76,7 @@ export class ContentTrakerOAuthClient {
     const authorizationUrl = new URL(authorizationEndpoint);
     authorizationUrl.search = new URLSearchParams({
       response_type: "code",
-      client_id: CLIENT_ID,
+      client_id: CONTENTTRAKER_OAUTH_CLIENT_ID,
       redirect_uri: callback.redirectUri,
       scope: DEFAULT_SCOPES.join(" "),
       state,
@@ -92,7 +92,7 @@ export class ContentTrakerOAuthClient {
         grant_type: "authorization_code",
         code,
         redirect_uri: callback.redirectUri,
-        client_id: CLIENT_ID,
+        client_id: CONTENTTRAKER_OAUTH_CLIENT_ID,
         code_verifier: verifier,
         resource: securityContext.tokenAudience,
       }));
@@ -131,7 +131,7 @@ export class ContentTrakerOAuthClient {
     return await this.transport.exchangeToken(new URL("/oauth/token", issuer), new URLSearchParams({
       grant_type: "refresh_token",
       refresh_token: refreshToken,
-      client_id: CLIENT_ID,
+      client_id: CONTENTTRAKER_OAUTH_CLIENT_ID,
       resource: securityContext.tokenAudience,
       scope: DEFAULT_SCOPES.join(" "),
     }));

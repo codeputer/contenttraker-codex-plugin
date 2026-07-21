@@ -17,17 +17,27 @@ process.env.CONTENTTRAKER_ENVIRONMENT = "staging";
 process.env.CONTENTTRAKER_STAGING_API_BASE_URL = "https://mcp.staging.contenttraker.com";
 
 async function concurrentUsersRetainDistinctCallerIdentity(): Promise<void> {
-  const oauth = new FakeOAuthClient(new Map([["connection-a", "user-a"], ["connection-b", "user-b"]]));
-  const provider = new DelegatedContentTrakerTokenProvider(new MemoryCredentialStore(), oauth as never, delegatedEnv());
+  const store = new MemoryCredentialStore();
+  const providerA = new DelegatedContentTrakerTokenProvider(
+    store,
+    new FakeOAuthClient(new Map([["connection-a", "user-a"]])) as never,
+    delegatedEnv({ CONTENTTRAKER_CREDENTIAL_PROFILE: "user-a" }),
+  );
+  const providerB = new DelegatedContentTrakerTokenProvider(
+    store,
+    new FakeOAuthClient(new Map([["connection-b", "user-b"]])) as never,
+    delegatedEnv({ CONTENTTRAKER_CREDENTIAL_PROFILE: "user-b" }),
+  );
   const overlap = new Barrier(2);
   const server = new RecordingServerApiClient(overlap);
-  const client = new EnvironmentContentTrakerApiClient(provider, server);
+  const clientA = new EnvironmentContentTrakerApiClient(providerA, server);
+  const clientB = new EnvironmentContentTrakerApiClient(providerB, server);
   const contextA = security("connection-a", "session-a", "request-a");
   const contextB = security("connection-b", "session-b", "request-b");
 
   const [resultA, resultB] = await Promise.all([
-    client.probeReadiness(undefined, contextA),
-    client.probeReadiness(undefined, contextB),
+    clientA.probeReadiness(undefined, contextA),
+    clientB.probeReadiness(undefined, contextB),
   ]);
 
   assert.equal(resultA.status, "ready");
@@ -49,7 +59,7 @@ async function sameUserSessionsRemainIsolated(): Promise<void> {
   ]);
 
   assert.equal(first.subjectId, second.subjectId);
-  assert.notEqual(first.credentialHandle, second.credentialHandle);
+  assert.equal(first.credentialHandle, second.credentialHandle);
   assert.notEqual(first.authorizationHeader, second.authorizationHeader);
 
   const overlap = new Barrier(2);
@@ -67,19 +77,29 @@ async function sameUserSessionsRemainIsolated(): Promise<void> {
 }
 
 async function workspaceAndIdentityNeverCross(): Promise<void> {
-  const oauth = new FakeOAuthClient(new Map([["connection-e", "user-e"], ["connection-f", "user-f"]]));
-  const provider = new DelegatedContentTrakerTokenProvider(new MemoryCredentialStore(), oauth as never, delegatedEnv());
+  const store = new MemoryCredentialStore();
+  const providerA = new DelegatedContentTrakerTokenProvider(
+    store,
+    new FakeOAuthClient(new Map([["connection-e", "user-e"]])) as never,
+    delegatedEnv({ CONTENTTRAKER_CREDENTIAL_PROFILE: "user-e" }),
+  );
+  const providerB = new DelegatedContentTrakerTokenProvider(
+    store,
+    new FakeOAuthClient(new Map([["connection-f", "user-f"]])) as never,
+    delegatedEnv({ CONTENTTRAKER_CREDENTIAL_PROFILE: "user-f" }),
+  );
   const overlap = new Barrier(2);
   const server = new RecordingServerApiClient(overlap, "/digital-assets/types");
-  const client = new EnvironmentContentTrakerApiClient(provider, server);
+  const clientA = new EnvironmentContentTrakerApiClient(providerA, server);
+  const clientB = new EnvironmentContentTrakerApiClient(providerB, server);
   const workspaceA = workspace("workspace-a");
   const workspaceB = workspace("workspace-b");
   const securityA = security("connection-e", "session-e", "request-e");
   const securityB = security("connection-f", "session-f", "request-f");
 
   await Promise.all([
-    client.listDigitalAssetTypes({}, workspaceA, securityA),
-    client.listDigitalAssetTypes({}, workspaceB, securityB),
+    clientA.listDigitalAssetTypes({}, workspaceA, securityA),
+    clientB.listDigitalAssetTypes({}, workspaceB, securityB),
   ]);
 
   const requestA = server.requests.find((request) => request.path.includes("workspace-a"));
@@ -88,10 +108,11 @@ async function workspaceAndIdentityNeverCross(): Promise<void> {
   assert.equal(subjectFromAuthorization(requestB?.authorization), "user-f");
 
   const sameWorkspaceServer = new RecordingServerApiClient(new Barrier(2), "/digital-assets/types");
-  const sameWorkspaceClient = new EnvironmentContentTrakerApiClient(provider, sameWorkspaceServer);
+  const sameWorkspaceClientA = new EnvironmentContentTrakerApiClient(providerA, sameWorkspaceServer);
+  const sameWorkspaceClientB = new EnvironmentContentTrakerApiClient(providerB, sameWorkspaceServer);
   await Promise.all([
-    sameWorkspaceClient.listDigitalAssetTypes({}, workspaceA, securityA),
-    sameWorkspaceClient.listDigitalAssetTypes({}, workspaceA, securityB),
+    sameWorkspaceClientA.listDigitalAssetTypes({}, workspaceA, securityA),
+    sameWorkspaceClientB.listDigitalAssetTypes({}, workspaceA, securityB),
   ]);
   assert.deepEqual(
     new Set(sameWorkspaceServer.requests.map((request) => subjectFromAuthorization(request.authorization))),
@@ -100,26 +121,36 @@ async function workspaceAndIdentityNeverCross(): Promise<void> {
 }
 
 async function oneSessionRefreshAndRevocationDoNotAffectAnother(): Promise<void> {
-  const oauth = new FakeOAuthClient(new Map([["connection-g", "user-g"], ["connection-h", "user-h"]]));
   const store = new MemoryCredentialStore();
-  const provider = new DelegatedContentTrakerTokenProvider(store, oauth as never, delegatedEnv());
+  const oauthA = new FakeOAuthClient(new Map([["connection-g", "user-g"]]));
+  const oauthB = new FakeOAuthClient(new Map([["connection-h", "user-h"]]));
+  const providerA = new DelegatedContentTrakerTokenProvider(
+    store,
+    oauthA as never,
+    delegatedEnv({ CONTENTTRAKER_CREDENTIAL_PROFILE: "user-g" }),
+  );
+  const providerB = new DelegatedContentTrakerTokenProvider(
+    store,
+    oauthB as never,
+    delegatedEnv({ CONTENTTRAKER_CREDENTIAL_PROFILE: "user-h" }),
+  );
   const contextA = security("connection-g", "session-g", "request-g");
   const contextB = security("connection-h", "session-h", "request-h");
-  const initialA = await provider.getAuthorizationHeader(contextA);
-  const initialB = await provider.getAuthorizationHeader(contextB);
+  const initialA = await providerA.getAuthorizationHeader(contextA);
+  const initialB = await providerB.getAuthorizationHeader(contextB);
 
   const [refreshedA, unchangedB] = await Promise.all([
-    provider.getAuthorizationHeader(contextA, { forceRefresh: true }),
-    provider.getAuthorizationHeader(contextB),
+    providerA.getAuthorizationHeader(contextA, { forceRefresh: true }),
+    providerB.getAuthorizationHeader(contextB),
   ]);
   assert.notEqual(refreshedA.authorizationHeader, initialA.authorizationHeader);
   assert.equal(unchangedB.authorizationHeader, initialB.authorizationHeader);
-  assert.equal(oauth.refreshCounts.get("connection-g"), 1);
-  assert.equal(oauth.refreshCounts.get("connection-h") ?? 0, 0);
+  assert.equal(oauthA.refreshCounts.get("connection-g"), 1);
+  assert.equal(oauthB.refreshCounts.get("connection-h") ?? 0, 0);
 
-  oauth.revokedConnections.add("connection-g");
-  await assert.rejects(() => provider.getAuthorizationHeader(contextA, { forceRefresh: true }), /revoked/);
-  const stillValidB = await provider.getAuthorizationHeader(contextB);
+  oauthA.revokedConnections.add("connection-g");
+  await assert.rejects(() => providerA.getAuthorizationHeader(contextA, { forceRefresh: true }), /revoked/);
+  const stillValidB = await providerB.getAuthorizationHeader(contextB);
   assert.equal(stillValidB.authorizationHeader, initialB.authorizationHeader);
 }
 

@@ -89,7 +89,11 @@ async function manualAuthorizationCompletesAndStoresCredential(): Promise<void> 
   assert.equal(completed.authorizationUrl, undefined);
   assert.equal(transport.exchangeCount, 1);
   assert.equal(store.values.size, 1);
-  assert.deepEqual([...store.values.values()], ["refresh-token-manual-code"]);
+  const stored = JSON.parse([...store.values.values()][0] ?? "{}") as Record<string, unknown>;
+  assert.equal(stored.refreshToken, "refresh-token-manual-code");
+  assert.equal(stored.clientId, "codex-mcp");
+  assert.equal(stored.profile, "default");
+  assert.equal(JSON.stringify(first).includes("refresh-token-manual-code"), false);
 
   const credential = await provider.getAuthorizationHeader(context);
   assert.equal(credential.subjectId, "user-manual");

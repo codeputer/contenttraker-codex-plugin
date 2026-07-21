@@ -36,6 +36,8 @@ For manual interaction:
 
 The authorization URL contains one-time OAuth request parameters, but the code verifier, authorization code, access token, and refresh credential are never returned by the tool. `cancel_contenttraker_authorization` closes only a pending local listener; it does not revoke an issued credential.
 
+The default credential profile is `default`. Set `CONTENTTRAKER_CREDENTIAL_PROFILE` before launching Codex when the WSL distribution needs more than one durable ContentTraker identity. Each profile binds to exactly one server-issued subject and cannot be silently overwritten by another user. A subsequent task in the same WSL user session reads the profile from Secret Service and rotates its refresh credential without repeating browser authorization.
+
 ## Fail-closed behavior
 
 If URL launch, loopback callback, native keyring loading, keyring access, token validation, `GET /me`, or host identity matching fails, the plugin stops at that layer. Do not work around the failure with a copied token, a committed credential, a desktop connector session, or a plaintext token cache.

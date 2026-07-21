@@ -11,6 +11,10 @@ const linuxDesktop = facts({
   systemBrowserLauncherAvailable: true,
   linuxSecretToolAvailable: true,
   linuxSecretServicePrerequisitesAvailable: true,
+  credentialStoreProvider: "linux-secret-service",
+  credentialStoreAvailable: true,
+  credentialStorePersistent: true,
+  credentialStoreDiagnostics: [],
 });
 
 const linuxResult = inspectRuntimeCapabilities(delegatedEnv(), linuxDesktop);
@@ -31,6 +35,10 @@ const wslResult = inspectRuntimeCapabilities(
     wslNativeBrowserIsolationAvailable: true,
     linuxSecretToolAvailable: true,
     linuxSecretServicePrerequisitesAvailable: true,
+    credentialStoreProvider: "linux-secret-service",
+    credentialStoreAvailable: true,
+    credentialStorePersistent: true,
+    credentialStoreDiagnostics: [],
   }),
 );
 assert.equal(wslResult.status, "ready");
@@ -65,12 +73,13 @@ const detectedWindowsFacts = detectRuntimeHostFacts(
   {
     platform: "win32",
     containerMarkerExists: false,
-    commandAvailable: (command) => command === "rundll32.exe",
+    commandAvailable: (command) => command === "rundll32.exe" || command === "powershell.exe",
   },
 );
 assert.equal(detectedWindowsFacts.platform, "windows");
 assert.equal(detectedWindowsFacts.browserInteractionMode, "system-browser");
 assert.equal(detectedWindowsFacts.systemBrowserLauncherAvailable, true);
+assert.equal(detectedWindowsFacts.credentialStoreProvider, "windows-credential-manager");
 
 const detectedContainerFacts = detectRuntimeHostFacts(
   { CI: "1", DISPLAY: ":0" },
@@ -99,11 +108,15 @@ const windowsResult = inspectRuntimeCapabilities(
     graphicalSessionAvailable: true,
     browserInteractionMode: "system-browser",
     systemBrowserLauncherAvailable: true,
+    credentialStoreProvider: "windows-credential-manager",
+    credentialStoreAvailable: true,
+    credentialStorePersistent: true,
+    credentialStoreDiagnostics: [],
   }),
 );
 assert.equal(windowsResult.selectedProfile, "windows-desktop");
-assert.equal(windowsResult.status, "blocked");
-assert.match(windowsResult.diagnostics.join(" "), /Windows secure credential provider/);
+assert.equal(windowsResult.status, "ready");
+assert.equal(windowsResult.selectedStrategy.credentialPersistence, "windows-credential-manager");
 
 const macosResult = inspectRuntimeCapabilities(
   delegatedEnv(),
@@ -112,11 +125,15 @@ const macosResult = inspectRuntimeCapabilities(
     graphicalSessionAvailable: true,
     browserInteractionMode: "system-browser",
     systemBrowserLauncherAvailable: true,
+    credentialStoreProvider: "macos-keychain",
+    credentialStoreAvailable: true,
+    credentialStorePersistent: true,
+    credentialStoreDiagnostics: [],
   }),
 );
 assert.equal(macosResult.selectedProfile, "macos-desktop");
-assert.equal(macosResult.status, "blocked");
-assert.match(macosResult.diagnostics.join(" "), /macOS secure credential provider/);
+assert.equal(macosResult.status, "ready");
+assert.equal(macosResult.selectedStrategy.credentialPersistence, "macos-keychain");
 
 const serviceToken = "runtime-test-service-token";
 const containerResult = inspectRuntimeCapabilities(
@@ -199,6 +216,10 @@ function facts(overrides: Partial<RuntimeHostFacts> = {}): RuntimeHostFacts {
     wslNativeBrowserIsolationAvailable: false,
     linuxSecretToolAvailable: false,
     linuxSecretServicePrerequisitesAvailable: false,
+    credentialStoreProvider: "unavailable",
+    credentialStoreAvailable: false,
+    credentialStorePersistent: false,
+    credentialStoreDiagnostics: ["Linux Secret Service requires secret-tool."],
     ...overrides,
   };
 }

@@ -734,6 +734,7 @@ async function callTool({ name, env, arguments: toolArguments }) {
   assert.equal(tools.some((tool) => tool.name === "begin_contenttraker_authorization"), true);
   assert.equal(tools.some((tool) => tool.name === "get_contenttraker_authorization_status"), true);
   assert.equal(tools.some((tool) => tool.name === "cancel_contenttraker_authorization"), true);
+  assert.equal(tools.some((tool) => tool.name === "forget_contenttraker_credential"), true);
   assert.equal(tools.some((tool) => tool.name === "get_current_user"), true);
   assert.equal(tools.some((tool) => tool.name === "list_workspaces"), true);
   assert.equal(
@@ -853,6 +854,9 @@ function cleanEnv(overrides) {
     "CONTENTTRAKER_ENVIRONMENT",
     "CONTENTTRAKER_RUNTIME_PROFILE",
     "CONTENTTRAKER_BROWSER_MODE",
+    "CONTENTTRAKER_CREDENTIAL_STORE",
+    "CONTENTTRAKER_CREDENTIAL_PROFILE",
+    "CONTENTTRAKER_ALLOW_EPHEMERAL_PRODUCTION",
     "CONTENTTRAKER_API_BASE_URL",
     "CONTENTTRAKER_STAGING_API_BASE_URL",
     "CONTENTTRAKER_PRODUCTION_API_BASE_URL",

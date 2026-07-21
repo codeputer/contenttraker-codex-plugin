@@ -39,6 +39,8 @@ Use the unauthenticated `inspect_runtime_capabilities` tool before authenticatio
 
 Interactive authorization supports platform browser launch on Windows, macOS, and non-WSL Linux; direct Linux-browser launch inside WSL; and a manual URL flow for headless or isolated hosts. Use `begin_contenttraker_authorization`, then poll `get_contenttraker_authorization_status` (optionally waiting up to 15 seconds per call). Use `cancel_contenttraker_authorization` to close a pending local callback listener. See [Authorization interaction](docs/authorization-interaction.md).
 
+Delegated refresh credentials use Windows Credential Manager, macOS Keychain, or Linux Secret Service according to host capabilities. `CONTENTTRAKER_CREDENTIAL_PROFILE` defaults to `default` and gives the credential a durable, connection-independent lookup key. A new Codex task refreshes that profile without repeating browser authorization. Containers and CI do not auto-select a user keyring; an ephemeral memory store must be selected explicitly, or service authentication must be configured. See [Credential storage](docs/credential-storage.md).
+
 ## Authentication and host identity policy
 
 The staging sign-in page is:
@@ -94,6 +96,8 @@ codex plugin marketplace remove contenttraker
 ```
 
 Removing the plugin does not delete operating-system keyring entries. Revoke ContentTraker authorization through the supported account/security workflow if access must be withdrawn.
+
+Before removal, `forget_contenttraker_credential` with confirmation `FORGET_CONTENTTRAKER_CREDENTIAL` deletes the selected local profile. This does not revoke the server authorization; use the ContentTraker account security workflow for that separate action.
 
 ## Build and verify
 

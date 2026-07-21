@@ -16,6 +16,10 @@ Do not open a public issue containing credentials, tokens, private ContentTraker
 
 ## Credential handling
 
-Interactive authentication is connection-scoped OAuth authorization code with PKCE. Refresh credentials belong only in the operating-system keyring. The project, plugin files, workspace registry, tool arguments, logs, diagnostics, and Git history must remain credential-free.
+Interactive authentication is OAuth authorization code with PKCE. Refresh credentials belong only in Windows Credential Manager, macOS Keychain, Linux Secret Service, or an explicitly selected process-memory store. The project, plugin files, workspace registry, command arguments, logs, diagnostics, and Git history must remain credential-free.
+
+Persistent entries are versioned envelopes bound to the ContentTraker environment, OAuth authority, audience/resource, public client, durable server subject, and configured credential profile. Email is host identity policy metadata and is not used as the durable credential subject. A profile cannot be overwritten by a different subject.
+
+Windows passes credential data to a static native-API PowerShell bridge over stdin. macOS uses `security -i` and passes hexadecimal password data over stdin. Linux passes credential data to `secret-tool` over stdin. Rotation locks contain no credential or identity data and are removed from the operating-system temporary directory after use.
 
 The plugin deliberately fails closed when the secure browser or keyring prerequisites are unavailable.

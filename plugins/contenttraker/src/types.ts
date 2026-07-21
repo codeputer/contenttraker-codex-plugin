@@ -25,6 +25,15 @@ export interface RuntimeHostFacts {
   wslNativeBrowserIsolationAvailable: boolean;
   linuxSecretToolAvailable: boolean;
   linuxSecretServicePrerequisitesAvailable: boolean;
+  credentialStoreProvider:
+    | "windows-credential-manager"
+    | "macos-keychain"
+    | "linux-secret-service"
+    | "ephemeral-memory"
+    | "unavailable";
+  credentialStoreAvailable: boolean;
+  credentialStorePersistent: boolean;
+  credentialStoreDiagnostics: string[];
 }
 
 export interface RuntimeCapability {
@@ -36,7 +45,14 @@ export interface RuntimeCapability {
 export interface RuntimeStrategySelection {
   authentication: "delegated-user-pkce" | "service-environment-token" | "invalid";
   interaction: "system-browser" | "manual-url" | "wsl-native" | "none";
-  credentialPersistence: "linux-secret-service" | "environment-service-token" | "none";
+  credentialProfile: string;
+  credentialPersistence:
+    | "windows-credential-manager"
+    | "macos-keychain"
+    | "linux-secret-service"
+    | "ephemeral-memory"
+    | "environment-service-token"
+    | "none";
   crossTaskRestoration: boolean;
 }
 
@@ -97,7 +113,15 @@ export interface TokenStrategyStatus {
   accessTokenPresent: boolean;
   source?: string;
   environmentTokenIgnored?: boolean;
-  credentialStore?: "os-keyring";
+  credentialStore?:
+    | "windows-credential-manager"
+    | "macos-keychain"
+    | "linux-secret-service"
+    | "ephemeral-memory"
+    | "unavailable"
+    | "custom";
+  credentialProfile?: string;
+  crossTaskRestoration?: boolean;
   authenticationPending?: boolean;
   subjectId?: string;
   tokenExpiryStatus?: "missing" | "valid" | "expiring" | "expired";
@@ -120,6 +144,8 @@ export interface RequestSecurityDiagnostics {
   requestId: string;
   authenticatedSubjectId?: string;
   credentialHandle?: string;
+  credentialProfile?: string;
+  credentialStore?: TokenStrategyStatus["credentialStore"];
   tokenAudience: string;
   tokenExpiryStatus: "missing" | "valid" | "expiring" | "expired";
   tokenExpiresAt?: string;
