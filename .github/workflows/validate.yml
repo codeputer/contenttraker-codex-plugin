@@ -1,0 +1,25 @@
+name: validate
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  plugin:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: plugins/contenttraker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: plugins/contenttraker/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: git diff --exit-code -- dist/server.mjs package-lock.json

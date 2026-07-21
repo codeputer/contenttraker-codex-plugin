@@ -1,0 +1,24 @@
+{
+  "name": "contenttraker",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit && esbuild src/server.ts --bundle --minify --platform=node --format=esm --target=node18 --external:@napi-rs/keyring --external:@napi-rs/keyring-* --outfile=dist/server.mjs",
+    "smoke": "npm run build && node tests/smoke.mjs",
+    "auth-concurrency": "tsc --noEmit -p tsconfig.tests.json && esbuild tests/auth-concurrency.ts --bundle --platform=node --format=esm --target=node18 --external:@napi-rs/keyring --external:@napi-rs/keyring-* --outfile=node_modules/.cache/contenttraker-auth-concurrency.mjs && node node_modules/.cache/contenttraker-auth-concurrency.mjs",
+    "test": "npm run smoke && npm run auth-concurrency"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@napi-rs/keyring": "^1.3.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "esbuild": "^0.25.0",
+    "selfsigned": "^5.5.0",
+    "typescript": "^5.8.0"
+  }
+}

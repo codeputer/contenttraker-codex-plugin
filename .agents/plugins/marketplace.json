@@ -1,0 +1,20 @@
+{
+  "name": "contenttraker",
+  "interface": {
+    "displayName": "ContentTraker"
+  },
+  "plugins": [
+    {
+      "name": "contenttraker",
+      "source": {
+        "source": "local",
+        "path": "./plugins/contenttraker"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

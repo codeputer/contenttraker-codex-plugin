@@ -1,0 +1,430 @@
+export type ContentTrakerEnvironment = "staging" | "production";
+
+export type ContextResolutionStatus =
+  | "resolved"
+  | "defaulted"
+  | "unconfigured"
+  | "unresolved";
+
+export interface EnvironmentProfileStatus {
+  requestedName: string;
+  name?: ContentTrakerEnvironment;
+  valid: boolean;
+  allowedNames: ContentTrakerEnvironment[];
+}
+
+export interface TokenStrategyStatus {
+  mode: "delegated-user-pkce" | "service" | "invalid";
+  configured: boolean;
+  accessTokenPresent: boolean;
+  source?: string;
+  environmentTokenIgnored?: boolean;
+  credentialStore?: "os-keyring";
+  authenticationPending?: boolean;
+  subjectId?: string;
+  tokenExpiryStatus?: "missing" | "valid" | "expiring" | "expired";
+}
+
+export interface ContentTrakerRequestSecurityContext {
+  environment: ContentTrakerEnvironment;
+  connectionId: string;
+  sessionId: string;
+  requestId: string;
+  correlationId: string;
+  tokenAudience: string;
+}
+
+export interface RequestSecurityDiagnostics {
+  environment: ContentTrakerEnvironment;
+  authenticationMode: TokenStrategyStatus["mode"];
+  connectionId: string;
+  sessionId: string;
+  requestId: string;
+  authenticatedSubjectId?: string;
+  credentialHandle?: string;
+  tokenAudience: string;
+  tokenExpiryStatus: "missing" | "valid" | "expiring" | "expired";
+  tokenExpiresAt?: string;
+  correlationId: string;
+  contentTrakerCorrelationId?: string;
+  effectiveCallerVerified: boolean;
+}
+
+export interface WritePolicyStatus {
+  writesExposed: boolean;
+  productionWritesEnabled: boolean;
+  mode:
+    | "staging-writes-enabled"
+    | "production-read-only"
+    | "production-explicit-enabled"
+    | "invalid-environment-read-only";
+  requiresExplicitConfirmation: boolean;
+  requiresIdempotencyKey: boolean;
+  requiresDraftStatus: boolean;
+  diagnostics: string[];
+}
+
+export interface ContentTrakerContext {
+  environment?: ContentTrakerEnvironment;
+  workspaceName?: string;
+  workspaceId?: string;
+  projectName?: string;
+  projectId?: string;
+  source: "registry-project" | "registry-default";
+}
+
+export interface ResolveContextInput {
+  projectName?: string;
+  workspaceName?: string;
+  repositoryRoot?: string;
+}
+
+export interface ProbeApiReadinessInput extends ResolveContextInput {}
+
+export interface CreateDigitalAssetInput extends ResolveContextInput {
+  title: string;
+  digitalAssetType: string;
+  content: string;
+  format?: "markdown" | "text";
+  tags?: string;
+  sourceSystem?: string;
+  sourceConversationId?: string;
+  sourceMessageId?: string;
+  provenanceNotes?: string;
+  visibilityScope?: string;
+  requiresReview?: boolean;
+  status?: "draft" | "published" | "archived";
+  userApprovalStatement: string;
+  idempotencyKey: string;
+  provenanceProjectId?: string;
+  provenanceProjectKey?: string;
+  productionConfirmation?: string;
+}
+
+export interface SetDigitalAssetStatusInput extends ResolveContextInput {
+  digitalAssetId: string;
+  status: "draft" | "published" | "archived";
+  reason?: string;
+  userApprovalStatement: string;
+  idempotencyKey: string;
+  productionConfirmation?: string;
+}
+
+export interface GetDigitalAssetInput extends ResolveContextInput {
+  digitalAssetId: string;
+  version?: number;
+  includeContent?: boolean;
+  provenanceProjectId?: string;
+  provenanceProjectKey?: string;
+}
+
+export interface SearchDigitalAssetsInput extends ResolveContextInput {
+  query?: string;
+  digitalAssetType?: string;
+  status?: "draft" | "published" | "archived";
+  tags?: string;
+  limit?: number;
+  includeContentSnippets?: boolean;
+  provenanceProjectId?: string;
+  provenanceProjectKey?: string;
+}
+
+export interface ListDigitalAssetTypesInput extends ResolveContextInput {}
+
+export interface UpdateDigitalAssetInput extends ResolveContextInput {
+  digitalAssetId: string;
+  title?: string;
+  content?: string;
+  tags?: string;
+  provenanceNotes?: string;
+  changeSummary?: string;
+  userApprovalStatement: string;
+  productionConfirmation?: string;
+}
+
+export interface BeginDigitalAssetUploadInput extends ResolveContextInput {
+  title: string;
+  digitalAssetType: string;
+  fileName?: string;
+  format?: "markdown" | "text";
+  sourceSystem?: string;
+  sourceConversationId?: string;
+  sourceMessageId?: string;
+  provenanceNotes?: string;
+  status?: "draft" | "archived";
+  userApprovalStatement: string;
+  provenanceProjectId?: string;
+  provenanceProjectKey?: string;
+  productionConfirmation?: string;
+}
+
+export interface AppendDigitalAssetUploadChunkInput extends ResolveContextInput {
+  uploadSessionId: string;
+  digitalAssetType: string;
+  fileName: string;
+  chunkIndex: number;
+  chunkContent: string;
+  contentEncoding?: "utf8" | "base64";
+  chunkSha256?: string;
+  provenanceProjectId?: string;
+  provenanceProjectKey?: string;
+  productionConfirmation?: string;
+}
+
+export interface CompleteDigitalAssetUploadInput extends ResolveContextInput {
+  uploadSessionId: string;
+  title: string;
+  digitalAssetType: string;
+  fileName: string;
+  chunkCount: number;
+  format?: "markdown" | "text";
+  tags?: string;
+  sourceSystem?: string;
+  sourceConversationId?: string;
+  sourceMessageId?: string;
+  provenanceNotes?: string;
+  visibilityScope?: string;
+  status?: "draft" | "archived";
+  requiresReview?: boolean;
+  userApprovalStatement: string;
+  provenanceProjectId?: string;
+  provenanceProjectKey?: string;
+  productionConfirmation?: string;
+}
+
+export interface UpsertRegistryMappingInput {
+  environment?: ContentTrakerEnvironment;
+  projectName: string;
+  repositoryRoot: string;
+  workspaceName?: string;
+  workspaceId?: string;
+  contentTrakerProjectName?: string;
+  contentTrakerProjectId?: string;
+  setDefault?: boolean;
+  dryRun?: boolean;
+}
+
+export interface RegistryProjectMapping {
+  projectName: string;
+  repositoryRoot?: string;
+  workspaceName?: string;
+  workspaceId?: string;
+  contentTrakerProjectName?: string;
+  contentTrakerProjectId?: string;
+}
+
+export interface WorkspaceRegistryDocument {
+  version: 1 | 2;
+  defaults?: {
+    workspaceName?: string;
+    workspaceId?: string;
+    projectName?: string;
+    projectId?: string;
+  };
+  projects?: RegistryProjectMapping[];
+  environments?: Partial<Record<ContentTrakerEnvironment, WorkspaceRegistryEnvironment>>;
+}
+
+export interface WorkspaceRegistryEnvironment {
+  defaults?: {
+    workspaceName?: string;
+    workspaceId?: string;
+    projectName?: string;
+    projectId?: string;
+  };
+  projects?: RegistryProjectMapping[];
+}
+
+export interface RegistrySnapshot {
+  path: string;
+  exists: boolean;
+  loaded: boolean;
+  environment?: ContentTrakerEnvironment;
+  environmentConfigured: boolean;
+  projectCount: number;
+  errors: string[];
+  documentVersion?: WorkspaceRegistryDocument["version"];
+  document?: WorkspaceRegistryDocument;
+  environmentDocument?: WorkspaceRegistryEnvironment;
+}
+
+export interface ApiClientStatus {
+  environment: string;
+  environmentProfile: EnvironmentProfileStatus;
+  baseUrl?: string;
+  baseUrlSource?: string;
+  configured: boolean;
+  accessTokenPresent: boolean;
+  tokenStrategy: TokenStrategyStatus;
+  writePolicy: WritePolicyStatus;
+  security?: RequestSecurityDiagnostics;
+}
+
+export type ApiCapabilityStatus = "available" | "blocked" | "future";
+
+export interface ApiCapabilityCheck {
+  name: string;
+  status: ApiCapabilityStatus;
+  method?: "GET" | "POST" | "PUT";
+  path?: string;
+  reason?: string;
+}
+
+export interface ApiContractResult {
+  status: "ready" | "blocked" | "gaps-found";
+  api: ApiClientStatus;
+  selectedContext?: ContentTrakerContext;
+  capabilities: ApiCapabilityCheck[];
+  diagnostics: string[];
+}
+
+export interface CreateDigitalAssetResult {
+  status: "created" | "idempotent-replay" | "blocked" | "failed";
+  api: ApiClientStatus;
+  selectedContext?: ContentTrakerContext;
+  asset?: {
+    digitalAssetId?: string;
+    workspaceId?: string;
+    workspaceKey?: string;
+    projectId?: string;
+    projectKey?: string;
+    title?: string;
+    digitalAssetType?: string;
+    status?: string;
+    requiresReview?: boolean;
+    version?: number;
+    createdAt?: string;
+    resourceUri?: string;
+    indexingJobId?: string;
+    operation?: string;
+  };
+  httpStatus?: number;
+  diagnostics: string[];
+}
+
+export interface SetDigitalAssetStatusResult {
+  status: "changed" | "unchanged" | "blocked" | "failed";
+  api: ApiClientStatus;
+  selectedContext?: ContentTrakerContext;
+  asset?: {
+    digitalAssetId?: string;
+    workspaceId?: string;
+    workspaceKey?: string;
+    projectId?: string;
+    projectKey?: string;
+    previousStatus?: string;
+    status?: string;
+    indexingJobId?: string;
+    changedAt?: string;
+    resourceUri?: string;
+    operation?: string;
+  };
+  httpStatus?: number;
+  diagnostics: string[];
+}
+
+export interface GetDigitalAssetResult {
+  status: "found" | "blocked" | "failed";
+  api: ApiClientStatus;
+  selectedContext?: ContentTrakerContext;
+  asset?: Record<string, unknown>;
+  httpStatus?: number;
+  diagnostics: string[];
+}
+
+export interface SearchDigitalAssetsResult {
+  status: "ready" | "blocked" | "failed";
+  api: ApiClientStatus;
+  selectedContext?: ContentTrakerContext;
+  workspaceId?: string;
+  workspaceKey?: string;
+  defaultStatus?: string;
+  results: Array<Record<string, unknown>>;
+  correlationId?: string;
+  httpStatus?: number;
+  diagnostics: string[];
+}
+
+export interface ListDigitalAssetTypesResult {
+  status: "ready" | "blocked" | "failed";
+  api: ApiClientStatus;
+  selectedContext?: ContentTrakerContext;
+  workspaceId?: string;
+  workspaceKey?: string;
+  digitalAssetTypes: Array<Record<string, unknown>>;
+  correlationId?: string;
+  httpStatus?: number;
+  diagnostics: string[];
+}
+
+export interface UpdateDigitalAssetResult {
+  status: "updated" | "blocked" | "failed";
+  api: ApiClientStatus;
+  selectedContext?: ContentTrakerContext;
+  asset?: Record<string, unknown>;
+  httpStatus?: number;
+  diagnostics: string[];
+}
+
+export interface DigitalAssetUploadResult {
+  status: "ready" | "staged" | "completed" | "blocked" | "failed";
+  api: ApiClientStatus;
+  selectedContext?: ContentTrakerContext;
+  upload?: Record<string, unknown>;
+  httpStatus?: number;
+  diagnostics: string[];
+}
+
+export type ApiReadinessStatus = "ready" | "blocked" | "failed";
+export type ApiReadinessCheckStatus = "ok" | "blocked" | "failed" | "skipped";
+
+export interface ApiReadinessCheck {
+  name: string;
+  method: "GET";
+  path: string;
+  attempted: boolean;
+  status: ApiReadinessCheckStatus;
+  httpStatus?: number;
+  itemCount?: number;
+  matched?: boolean;
+  reason?: string;
+  correlationId?: string;
+}
+
+export interface ApiReadinessResult {
+  status: ApiReadinessStatus;
+  api: ApiClientStatus;
+  selectedContext?: ContentTrakerContext;
+  checks: ApiReadinessCheck[];
+  diagnostics: string[];
+}
+
+export interface ResolveContextResult {
+  status: ContextResolutionStatus;
+  selectedContext?: ContentTrakerContext;
+  registry: {
+    path: string;
+    exists: boolean;
+    loaded: boolean;
+    environment?: ContentTrakerEnvironment;
+    environmentConfigured: boolean;
+    documentVersion?: WorkspaceRegistryDocument["version"];
+    projectCount: number;
+  };
+  api: ApiClientStatus;
+  diagnostics: string[];
+}
+
+export interface RegistryUpsertResult {
+  status: "created" | "updated" | "unchanged" | "dry-run";
+  dryRun: boolean;
+  registry: {
+    path: string;
+    existsBefore: boolean;
+    documentVersion: 2;
+    environment: ContentTrakerEnvironment;
+    projectCount: number;
+  };
+  selectedContext: ContentTrakerContext;
+  diagnostics: string[];
+}

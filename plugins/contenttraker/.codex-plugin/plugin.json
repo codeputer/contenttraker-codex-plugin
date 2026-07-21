@@ -1,0 +1,31 @@
+{
+  "name": "contenttraker",
+  "version": "0.1.0",
+  "description": "Secure local Codex adapter for ContentTraker workspace and digital asset operations.",
+  "author": {
+    "name": "PhxBiz",
+    "email": "support@contenttraker.com",
+    "url": "https://contenttraker.com"
+  },
+  "homepage": "https://github.com/codeputer/contenttraker-codex-plugin",
+  "repository": "https://github.com/codeputer/contenttraker-codex-plugin",
+  "license": "MIT",
+  "keywords": ["contenttraker", "codex", "mcp", "oauth", "wsl"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "ContentTraker",
+    "shortDescription": "Use ContentTraker securely from a local Codex host.",
+    "longDescription": "Connects Codex to the documented ContentTraker API using connection-scoped OAuth authorization code with PKCE, verifies the effective user, and provides workspace and digital asset tools.",
+    "developerName": "PhxBiz",
+    "category": "Productivity",
+    "capabilities": ["MCP", "OAuth PKCE", "Workspace Context", "Digital Assets"],
+    "websiteURL": "https://contenttraker.com",
+    "defaultPrompt": [
+      "Report the authenticated ContentTraker user.",
+      "List my authorized ContentTraker workspaces.",
+      "Create an approved draft digital asset."
+    ],
+    "brandColor": "#0F766E"
+  },
+  "mcpServers": "./.mcp.json"
+}
