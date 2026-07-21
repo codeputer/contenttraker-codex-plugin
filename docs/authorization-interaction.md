@@ -2,6 +2,8 @@
 
 The plugin keeps one ContentTraker OAuth contract while selecting an interaction provider from actual host capabilities. `CONTENTTRAKER_BROWSER_MODE` accepts `auto`, `system`, `manual`, or `wsl-native` and defaults to `auto`.
 
+Before binding a loopback listener or launching a browser, the plugin validates the live protected-resource and authorization-server metadata. It uses the advertised authorization and token endpoints rather than constructing endpoint paths. A metadata mismatch stops at that layer.
+
 | Host | Automatic selection |
 | --- | --- |
 | Windows desktop | `system-browser` through `rundll32.exe` |
@@ -25,4 +27,4 @@ The authorization URL necessarily contains one-time OAuth request parameters. Th
 
 ## Server dependencies
 
-Authorization code interaction requires the ContentTraker authorization server to permit public client `codex-mcp`, the requested scopes, PKCE `S256`, and dynamic loopback redirects in the form `http://127.0.0.1:<port>/oauth/callback`. Device authorization remains unavailable until the server advertises and implements the corresponding metadata and grant.
+Authorization code interaction requires the ContentTraker authorization server to permit public client `codex-mcp`, the requested scopes, PKCE `S256`, and dynamic loopback redirects in the form `http://127.0.0.1:<port>/oauth/callback`. Device authorization remains unavailable until the server advertises both a device endpoint and device-code grant.

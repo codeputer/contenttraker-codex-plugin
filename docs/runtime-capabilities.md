@@ -23,6 +23,8 @@ An explicit profile does not manufacture missing host capabilities. If the selec
 
 Call `inspect_runtime_capabilities` before authentication troubleshooting or host-specific setup. It does not authenticate, read ContentTraker business data, or call the ContentTraker API.
 
+Host capability inspection is intentionally offline. Call `inspect_contenttraker_oauth_metadata` for the separate live server-capability check. That tool does not authenticate or access business data.
+
 The result reports only non-secret facts:
 
 - requested and selected runtime profiles;
@@ -58,6 +60,6 @@ Operating-system identity alone is not sufficient evidence of interactivity. Non
 
 The current branch implements delegated authorization code + PKCE with system-browser, WSL-native, and manual URL interaction providers. Persistent refresh credentials use Windows Credential Manager, macOS Keychain, or Linux Secret Service. They are stored as binding-validated profiles independent of MCP connection/session IDs and can be rediscovered and refreshed by a new task. Explicit `memory` mode is available for ephemeral hosts; production additionally requires `CONTENTTRAKER_ALLOW_EPHEMERAL_PRODUCTION=true`.
 
-Automatic delegated credential persistence is disabled in containers and CI. Those hosts must explicitly choose memory-only behavior or use service authentication until ContentTraker exposes a supported workload-identity grant. Device authorization and workload identity remain external capabilities.
+Automatic delegated credential persistence is disabled in containers and CI. Those hosts must explicitly choose memory-only behavior or use service authentication until ContentTraker exposes a supported workload-identity grant. Live metadata currently reports device authorization and workload identity as unavailable; both remain external capabilities.
 
 Service mode currently reports ready only when the selected ContentTraker environment has its matching service token configured. The diagnostic reports presence only and never returns the token.

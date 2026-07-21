@@ -9,6 +9,8 @@ Use this plugin's local MCP tools. Do not reuse a ChatGPT connector session, req
 
 Call `inspect_runtime_capabilities` before authentication troubleshooting or host-specific setup. ContentTraker target environment and host runtime profile are independent; this read-only tool reports the selected profile and redacted host capability diagnostics without authenticating or calling ContentTraker.
 
+Call `inspect_contenttraker_oauth_metadata` when diagnosing authorization-server, scope, PKCE, device-flow, workload-flow, or protected-resource readiness. Do not infer a device or workload endpoint. Treat it as available only when this live metadata tool reports it.
+
 If delegated authentication is needed, call `begin_contenttraker_authorization`. When it returns `pending`, present its authorization URL to the user without rewriting it, then call `get_contenttraker_authorization_status` with a bounded `waitSeconds` value. Do not ask the user for an authorization code, token, verifier, cookie, or refresh credential. Use `cancel_contenttraker_authorization` only to close a pending local callback listener. After `authorized`, call `get_current_user`; authorization status alone does not prove the effective ContentTraker identity.
 
 The adapter restores a persistent `CONTENTTRAKER_CREDENTIAL_PROFILE` automatically in a new task. Treat a profile/subject mismatch as an identity boundary and stop; do not switch profiles or delete credentials without user direction. `forget_contenttraker_credential` requires the literal confirmation `FORGET_CONTENTTRAKER_CREDENTIAL`, deletes only the selected local profile, and does not revoke server authorization.

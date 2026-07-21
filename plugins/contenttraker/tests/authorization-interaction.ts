@@ -11,6 +11,7 @@ import {
   type OAuthTokenResponse,
   type OAuthTransport,
 } from "../src/oauth-client.js";
+import { ContentTrakerOAuthMetadataResolver } from "../src/oauth-metadata.js";
 import { DelegatedContentTrakerTokenProvider } from "../src/token-provider.js";
 import type { ContentTrakerRequestSecurityContext } from "../src/types.js";
 
@@ -140,6 +141,28 @@ async function authorizationFailuresAreRedacted(): Promise<void> {
   assert.equal(JSON.stringify(failed).includes("raw-access-token"), false);
 }
 
+async function tokenResponsesMustGrantRequiredScopes(): Promise<void> {
+  const provider = providerFor(
+    new MemoryCredentialStore(),
+    {
+      exchangeToken: async () => ({
+        accessToken: jwt("scope-user"),
+        refreshToken: "scope-refresh-token",
+        expiresInSeconds: 3_600,
+        scope: "workspaces:read digital_assets:read",
+        resource: audience,
+      }),
+    },
+    2_000,
+  );
+  const context = security("scope-connection", "scope-session");
+  const pending = await provider.beginAuthorization(context);
+  await completeCallback(pending, "scope-code");
+  const failed = await provider.getAuthorizationStatus(context, 1_000);
+  assert.equal(failed.status, "failed");
+  assert.equal(JSON.stringify(failed).includes("scope-refresh-token"), false);
+}
+
 function providerFor(
   store: SecureCredentialStore,
   transport: OAuthTransport,
@@ -150,7 +173,7 @@ function providerFor(
     { CONTENTTRAKER_BROWSER_MODE: "manual" },
     { platform: "linux", kernelRelease: "generic-linux", commandAvailable: () => false },
   );
-  const oauthClient = new ContentTrakerOAuthClient(issuer, launcher, transport, timeoutMs);
+  const oauthClient = new ContentTrakerOAuthClient(issuer, launcher, transport, timeoutMs, testMetadataResolver());
   return new DelegatedContentTrakerTokenProvider(store, oauthClient, environment);
 }
 
@@ -187,7 +210,7 @@ class RecordingOAuthTransport implements OAuthTransport {
       accessToken: jwt("user-manual"),
       refreshToken: `refresh-token-${code}`,
       expiresInSeconds: 3_600,
-      scope: "workspaces:read digital_assets:read",
+      scope: "workspaces:read workspaces:write projects:read projects:write digital_assets:read digital_assets:write digital_assets:review",
       resource: audience,
     };
   }
@@ -199,6 +222,37 @@ function delegatedEnvironment(): NodeJS.ProcessEnv {
     CONTENTTRAKER_AUTH_MODE: "delegated",
     CONTENTTRAKER_TOKEN_ISSUER_SHA256: createHash("sha256").update("public-test-issuer").digest("hex"),
   };
+}
+
+function testMetadataResolver(): ContentTrakerOAuthMetadataResolver {
+  const scopes = [
+    "workspaces:read",
+    "workspaces:write",
+    "projects:read",
+    "projects:write",
+    "digital_assets:read",
+    "digital_assets:write",
+    "digital_assets:review",
+  ];
+  return new ContentTrakerOAuthMetadataResolver({
+    getJson: async (url) => url.pathname.includes("oauth-protected-resource")
+      ? {
+          resource: audience,
+          authorization_servers: [issuer],
+          scopes_supported: scopes,
+          bearer_methods_supported: ["header"],
+        }
+      : {
+          issuer,
+          authorization_endpoint: `${issuer}/oauth/authorize`,
+          token_endpoint: `${issuer}/oauth/token`,
+          response_types_supported: ["code"],
+          grant_types_supported: ["authorization_code", "refresh_token"],
+          code_challenge_methods_supported: ["S256"],
+          token_endpoint_auth_methods_supported: ["none"],
+          scopes_supported: scopes,
+        },
+  });
 }
 
 function security(connectionId: string, sessionId: string): ContentTrakerRequestSecurityContext {
@@ -229,5 +283,6 @@ await manualAuthorizationCompletesAndStoresCredential();
 await manualAuthorizationCanBeCancelled();
 await manualAuthorizationExpires();
 await authorizationFailuresAreRedacted();
+await tokenResponsesMustGrantRequiredScopes();
 
 console.log("ContentTraker authorization interaction tests passed.");

@@ -2,6 +2,10 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { EnvironmentContentTrakerApiClient } from "./contenttraker-api-client.js";
+import { createSecureCredentialStore } from "./credential-store.js";
+import { resolveAdapterEnvironment } from "./environment-profile.js";
+import { ContentTrakerOAuthClient } from "./oauth-client.js";
+import { ContentTrakerOAuthMetadataResolver } from "./oauth-metadata.js";
 import { ContentTrakerSecurityContextFactory } from "./security-context.js";
 import { createContentTrakerTokenProvider } from "./token-provider.js";
 import { appendDigitalAssetUploadChunk } from "./tools/append-digital-asset-upload-chunk.js";
@@ -19,7 +23,20 @@ import { setDigitalAssetStatus } from "./tools/set-digital-asset-status.js";
 import { upsertContentTrakerRegistryMapping } from "./tools/upsert-contenttraker-registry-mapping.js";
 import { updateDigitalAsset } from "./tools/update-digital-asset.js";
 
-const tokenProvider = createContentTrakerTokenProvider();
+const environmentProfile = resolveAdapterEnvironment();
+const oauthMetadataResolver = new ContentTrakerOAuthMetadataResolver();
+const oauthClient = new ContentTrakerOAuthClient(
+  environmentProfile.oauthIssuer ?? "",
+  undefined,
+  undefined,
+  undefined,
+  oauthMetadataResolver,
+);
+const tokenProvider = createContentTrakerTokenProvider(
+  process.env,
+  createSecureCredentialStore(),
+  oauthClient,
+);
 const apiClient = new EnvironmentContentTrakerApiClient(tokenProvider);
 const securityContextFactory = new ContentTrakerSecurityContextFactory();
 
@@ -44,6 +61,32 @@ server.registerTool(
   },
   async () => {
     const result = inspectContentTrakerRuntimeCapabilities();
+    return {
+      content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+      structuredContent: result as unknown as Record<string, unknown>,
+    };
+  },
+);
+
+server.registerTool(
+  "inspect_contenttraker_oauth_metadata",
+  {
+    title: "Inspect ContentTraker OAuth Metadata",
+    description:
+      "Fetch and validate ContentTraker protected-resource and authorization-server metadata without authenticating or returning credentials.",
+    inputSchema: {},
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+    },
+  },
+  async () => {
+    const result = await oauthMetadataResolver.inspect(
+      environmentProfile.oauthIssuer ?? "",
+      environmentProfile.oauthResource ?? "",
+    );
     return {
       content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
       structuredContent: result as unknown as Record<string, unknown>,

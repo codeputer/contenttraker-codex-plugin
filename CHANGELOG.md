@@ -10,6 +10,8 @@
 - Adds capability-probed Windows Credential Manager, macOS Keychain, Linux Secret Service, and explicitly selected ephemeral-memory credential providers.
 - Replaces connection/session-derived keyring handles with binding-validated durable profiles and restores rotating refresh credentials in new tasks.
 - Serializes refresh rotation across adapter processes with metadata-free temporary locks and adds confirmed local credential deletion.
+- Negotiates and validates live protected-resource and authorization-server metadata before authorization or refresh, and rejects incomplete scope grants.
+- Adds `inspect_contenttraker_oauth_metadata` plus a non-secret staging contract probe for `codex-mcp`, PKCE, requested scopes, and dynamic loopback redirects.
 
 ## 0.1.2 - 2026-07-21
 

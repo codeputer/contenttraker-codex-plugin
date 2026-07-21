@@ -23,3 +23,5 @@ Persistent entries are versioned envelopes bound to the ContentTraker environmen
 Windows passes credential data to a static native-API PowerShell bridge over stdin. macOS uses `security -i` and passes hexadecimal password data over stdin. Linux passes credential data to `secret-tool` over stdin. Rotation locks contain no credential or identity data and are removed from the operating-system temporary directory after use.
 
 The plugin deliberately fails closed when the secure browser or keyring prerequisites are unavailable.
+
+OAuth interaction also fails closed until live metadata proves the configured resource/issuer relationship, same-authority HTTPS endpoints, code and refresh grants, public-client token authentication, PKCE `S256`, bearer-header support, and every requested scope. Metadata is cached only in process memory for a bounded interval. Redirects from metadata endpoints are rejected.

@@ -731,6 +731,7 @@ async function callTool({ name, env, arguments: toolArguments }) {
     true,
   );
   assert.equal(tools.some((tool) => tool.name === "inspect_runtime_capabilities"), true);
+  assert.equal(tools.some((tool) => tool.name === "inspect_contenttraker_oauth_metadata"), true);
   assert.equal(tools.some((tool) => tool.name === "begin_contenttraker_authorization"), true);
   assert.equal(tools.some((tool) => tool.name === "get_contenttraker_authorization_status"), true);
   assert.equal(tools.some((tool) => tool.name === "cancel_contenttraker_authorization"), true);
