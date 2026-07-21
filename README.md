@@ -2,6 +2,12 @@
 
 Public, reviewable Codex marketplace package for the ContentTraker local MCP adapter. The private ContentTraker application remains in a separate private repository; this repository contains only the client adapter, its tests, plugin metadata, and operator documentation.
 
+## Stewardship and runtime identity
+
+This public plugin repository was created and defined by Richard Reukema (`richard@phoenixbussolutions.com`). That Phoenix identity is the repository authorship and release-publishing identity.
+
+An installation's authenticated ContentTraker user is a separate runtime identity supplied and verified inside the consuming host. Customer, organization, host, and workspace identities are not committed as plugin defaults. See [AUTHORS.md](AUTHORS.md).
+
 ## Release status
 
 The plugin package is installable and its MCP process starts without the private ContentTraker repository. Delegated sign-in uses ContentTraker's authorization-code flow with PKCE and does not reuse a ChatGPT desktop connector session.
@@ -17,7 +23,7 @@ If either the browser bridge or keyring is unavailable, authentication stops. Th
 ## Install a reviewed release
 
 ```bash
-codex plugin marketplace add https://github.com/codeputer/contenttraker-codex-plugin.git --ref v0.1.1
+codex plugin marketplace add https://github.com/codeputer/contenttraker-codex-plugin.git --ref v0.1.2
 codex plugin marketplace list
 codex plugin list
 codex plugin add contenttraker@contenttraker
@@ -66,7 +72,7 @@ Pin a new reviewed tag by replacing the marketplace snapshot:
 ```bash
 codex plugin remove contenttraker@contenttraker
 codex plugin marketplace remove contenttraker
-codex plugin marketplace add https://github.com/codeputer/contenttraker-codex-plugin.git --ref v0.1.1
+codex plugin marketplace add https://github.com/codeputer/contenttraker-codex-plugin.git --ref v0.1.2
 codex plugin add contenttraker@contenttraker
 ```
 

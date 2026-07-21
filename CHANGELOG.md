@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.2 - 2026-07-21
+
+- Records Richard Reukema (`richard@phoenixbussolutions.com`) as the repository creator and release-publishing identity.
+- Clarifies that consuming-host ContentTraker identities remain external runtime policy inputs and are never plugin defaults.
+
 ## 0.1.1 - 2026-07-21
 
 - Makes the WSL runtime self-contained by using Linux Secret Service through `secret-tool`; no `npm` or native Node keyring package is required after marketplace installation.
