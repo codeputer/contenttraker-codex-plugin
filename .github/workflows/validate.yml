@@ -24,3 +24,9 @@ jobs:
       - run: npm audit --omit=dev
       - run: npm test
       - run: git diff --exit-code -- dist/server.mjs package-lock.json
+      - name: Verify unused HTTP server is absent from release bundle
+        run: |
+          if grep -Eiq '@hono/node-server|serve-static|serveStatic' dist/server.mjs; then
+            echo 'Unused HTTP/static-server code was included in the release bundle.'
+            exit 1
+          fi
