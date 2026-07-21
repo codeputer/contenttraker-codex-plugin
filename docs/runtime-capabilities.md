@@ -49,10 +49,10 @@ The tool never returns environment token values, access tokens, refresh tokens, 
 6. Evaluate `CONTENTTRAKER_AUTH_MODE` against the selected host capabilities.
 7. Return `blocked` or `invalid` rather than silently choosing a weaker authentication or credential-storage strategy.
 
-Operating-system identity alone is not sufficient evidence of interactivity. Linux and WSL require a graphical-session signal and `xdg-open`; container and CI signals suppress automatic desktop selection. The current `xdg-open` provider cannot prove that a WSL authorization stayed inside a Linux browser, so `wsl-native-browser-isolation` remains a separate blocked/future capability and Windows browser interoperability remains disabled by default.
+Operating-system identity alone is not sufficient evidence of interactivity. Non-WSL Linux desktop selection requires a graphical-session signal and `xdg-open`; container and CI signals suppress automatic desktop selection. Inside WSL, the plugin launches a known Linux browser executable directly when one is available. It never routes WSL authorization through `xdg-open`; when no native browser is found it selects the manual URL provider. Windows browser interoperability remains disabled.
 
 ## Current provider coverage
 
-Version 0.1.2 implements delegated authorization code + PKCE with a system browser launcher and Linux Secret Service through `secret-tool`. Windows Credential Manager, macOS Keychain, manual authorization URL completion, device authorization, workload identity, explicit production memory-only credentials, and durable cross-task restoration are reported as future or external capabilities until their Epic #2 work is completed.
+The current branch implements delegated authorization code + PKCE with system-browser, WSL-native, and manual URL interaction providers plus Linux Secret Service through `secret-tool`. Windows Credential Manager, macOS Keychain, device authorization, workload identity, explicit production memory-only credentials, and durable cross-task restoration remain future or external capabilities until their Epic #2 work is completed.
 
 Service mode currently reports ready only when the selected ContentTraker environment has its matching service token configured. The diagnostic reports presence only and never returns the token.

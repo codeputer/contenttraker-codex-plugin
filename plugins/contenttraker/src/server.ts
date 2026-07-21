@@ -3,6 +3,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { EnvironmentContentTrakerApiClient } from "./contenttraker-api-client.js";
 import { ContentTrakerSecurityContextFactory } from "./security-context.js";
+import { createContentTrakerTokenProvider } from "./token-provider.js";
 import { appendDigitalAssetUploadChunk } from "./tools/append-digital-asset-upload-chunk.js";
 import { beginDigitalAssetUpload } from "./tools/begin-digital-asset-upload.js";
 import { completeDigitalAssetUpload } from "./tools/complete-digital-asset-upload.js";
@@ -18,7 +19,8 @@ import { setDigitalAssetStatus } from "./tools/set-digital-asset-status.js";
 import { upsertContentTrakerRegistryMapping } from "./tools/upsert-contenttraker-registry-mapping.js";
 import { updateDigitalAsset } from "./tools/update-digital-asset.js";
 
-const apiClient = new EnvironmentContentTrakerApiClient();
+const tokenProvider = createContentTrakerTokenProvider();
+const apiClient = new EnvironmentContentTrakerApiClient(tokenProvider);
 const securityContextFactory = new ContentTrakerSecurityContextFactory();
 
 const server = new McpServer({
@@ -42,6 +44,80 @@ server.registerTool(
   },
   async () => {
     const result = inspectContentTrakerRuntimeCapabilities();
+    return {
+      content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+      structuredContent: result as unknown as Record<string, unknown>,
+    };
+  },
+);
+
+server.registerTool(
+  "begin_contenttraker_authorization",
+  {
+    title: "Begin ContentTraker Authorization",
+    description:
+      "Start or reuse a connection-scoped delegated OAuth authorization flow and return its one-time authorization URL without returning credentials.",
+    inputSchema: {},
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+    },
+  },
+  async (_input, extra) => {
+    const result = await tokenProvider.beginAuthorization(securityContextFactory.create(extra));
+    return {
+      content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+      structuredContent: result as unknown as Record<string, unknown>,
+    };
+  },
+);
+
+server.registerTool(
+  "get_contenttraker_authorization_status",
+  {
+    title: "Get ContentTraker Authorization Status",
+    description:
+      "Report the connection-scoped delegated OAuth flow status without returning credentials or calling a ContentTraker business API.",
+    inputSchema: {
+      waitSeconds: z.number().int().min(0).max(15).optional().describe("Optional bounded wait for callback completion."),
+    },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  },
+  async (input, extra) => {
+    const result = await tokenProvider.getAuthorizationStatus(
+      securityContextFactory.create(extra),
+      (input.waitSeconds ?? 0) * 1_000,
+    );
+    return {
+      content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+      structuredContent: result as unknown as Record<string, unknown>,
+    };
+  },
+);
+
+server.registerTool(
+  "cancel_contenttraker_authorization",
+  {
+    title: "Cancel ContentTraker Authorization",
+    description:
+      "Cancel the pending connection-scoped OAuth callback listener without revoking an already-issued server credential.",
+    inputSchema: {},
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  },
+  async (_input, extra) => {
+    const result = await tokenProvider.cancelAuthorization(securityContextFactory.create(extra));
     return {
       content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
       structuredContent: result as unknown as Record<string, unknown>,

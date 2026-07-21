@@ -4,6 +4,9 @@
 
 - Adds an independent host runtime capability model and unauthenticated `inspect_runtime_capabilities` tool for Windows, macOS, Linux, WSL, headless, container, and CI profile selection.
 - Reports current, blocked, future, and externally dependent authentication, interaction, credential-persistence, and cross-task restoration capabilities without exposing credentials.
+- Adds platform browser, WSL-native browser, and manual authorization URL providers selected by `CONTENTTRAKER_BROWSER_MODE`.
+- Adds begin, bounded status, and cancel tools for connection-scoped authorization while keeping OAuth codes, verifiers, access tokens, and refresh credentials internal.
+- Disables `xdg-open` and Windows browser interoperability inside WSL; WSL either launches a known Linux browser directly or returns a manual URL while retaining the loopback listener.
 
 ## 0.1.2 - 2026-07-21
 
@@ -25,4 +28,4 @@
 - Uses ContentTraker OAuth authorization code with PKCE and OS-keyring refresh-token storage; no connector-session or plaintext credential fallback exists.
 - Documents installation, upgrade, removal, security, and WSL prerequisites.
 
-Known limitation: headless WSL hosts without both a usable browser/loopback path and Linux Secret Service provider cannot complete delegated authentication. The ContentTraker OAuth service does not currently advertise device authorization, so those hosts fail closed.
+Known limitation: a host still needs a browser path that can return to its loopback listener and a supported secure credential provider. The ContentTraker OAuth service does not currently advertise device authorization, so hosts unable to satisfy the loopback flow fail closed.

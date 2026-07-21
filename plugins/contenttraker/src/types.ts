@@ -20,6 +20,7 @@ export interface RuntimeHostFacts {
   isCi: boolean;
   graphicalSessionAvailable: boolean;
   dbusSessionAvailable: boolean;
+  browserInteractionMode: "system-browser" | "manual-url" | "wsl-native" | "invalid";
   systemBrowserLauncherAvailable: boolean;
   wslNativeBrowserIsolationAvailable: boolean;
   linuxSecretToolAvailable: boolean;
@@ -34,7 +35,7 @@ export interface RuntimeCapability {
 
 export interface RuntimeStrategySelection {
   authentication: "delegated-user-pkce" | "service-environment-token" | "invalid";
-  interaction: "system-browser" | "none";
+  interaction: "system-browser" | "manual-url" | "wsl-native" | "none";
   credentialPersistence: "linux-secret-service" | "environment-service-token" | "none";
   crossTaskRestoration: boolean;
 }
@@ -56,6 +57,24 @@ export interface RuntimeCapabilitiesResult {
     credentialPersistence: RuntimeCapability[];
     sessionRestoration: RuntimeCapability[];
   };
+  diagnostics: string[];
+}
+
+export type AuthorizationFlowStatus =
+  | "idle"
+  | "pending"
+  | "authorized"
+  | "failed"
+  | "expired"
+  | "cancelled"
+  | "blocked";
+
+export interface AuthorizationFlowResult {
+  status: AuthorizationFlowStatus;
+  interaction?: "system-browser" | "manual-url" | "wsl-native";
+  authorizationUrl?: string;
+  redirectUri?: string;
+  expiresAt?: string;
   diagnostics: string[];
 }
 

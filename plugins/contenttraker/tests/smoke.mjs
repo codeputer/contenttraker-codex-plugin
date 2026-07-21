@@ -291,6 +291,27 @@ try {
   assert.equal(runtimeCapabilities.contentTrakerEnvironment.name, "staging");
   assert.equal(JSON.stringify(runtimeCapabilities).includes("test-staging-token"), false);
 
+  const serviceAuthorizationStatus = await callTool({
+    name: "get_contenttraker_authorization_status",
+    env: {
+      CONTENTTRAKER_ENVIRONMENT: "staging",
+      CONTENTTRAKER_STAGING_ACCESS_TOKEN: "test-staging-token",
+    },
+    arguments: {},
+  });
+  assert.equal(serviceAuthorizationStatus.status, "authorized");
+  assert.equal(JSON.stringify(serviceAuthorizationStatus).includes("test-staging-token"), false);
+
+  const serviceAuthorizationBegin = await callTool({
+    name: "begin_contenttraker_authorization",
+    env: {
+      CONTENTTRAKER_ENVIRONMENT: "staging",
+      CONTENTTRAKER_STAGING_ACCESS_TOKEN: "test-staging-token",
+    },
+    arguments: {},
+  });
+  assert.equal(serviceAuthorizationBegin.status, "blocked");
+
   const unconfigured = await callTool({
     name: "resolve_contenttraker_context",
     env: {
@@ -710,6 +731,9 @@ async function callTool({ name, env, arguments: toolArguments }) {
     true,
   );
   assert.equal(tools.some((tool) => tool.name === "inspect_runtime_capabilities"), true);
+  assert.equal(tools.some((tool) => tool.name === "begin_contenttraker_authorization"), true);
+  assert.equal(tools.some((tool) => tool.name === "get_contenttraker_authorization_status"), true);
+  assert.equal(tools.some((tool) => tool.name === "cancel_contenttraker_authorization"), true);
   assert.equal(tools.some((tool) => tool.name === "get_current_user"), true);
   assert.equal(tools.some((tool) => tool.name === "list_workspaces"), true);
   assert.equal(
@@ -828,6 +852,7 @@ function cleanEnv(overrides) {
   const keys = [
     "CONTENTTRAKER_ENVIRONMENT",
     "CONTENTTRAKER_RUNTIME_PROFILE",
+    "CONTENTTRAKER_BROWSER_MODE",
     "CONTENTTRAKER_API_BASE_URL",
     "CONTENTTRAKER_STAGING_API_BASE_URL",
     "CONTENTTRAKER_PRODUCTION_API_BASE_URL",

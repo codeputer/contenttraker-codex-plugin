@@ -2,7 +2,7 @@
 
 ## Supported contract
 
-Interactive sessions use ContentTraker OAuth authorization code with PKCE (`S256`) and public client ID `codex-mcp`. The adapter opens the authorization URL, listens on a loopback callback, exchanges the one-time code inside the adapter process, validates token routing claims, and calls `GET /me` before any business operation.
+Interactive sessions use ContentTraker OAuth authorization code with PKCE (`S256`) and public client ID `codex-mcp`. The adapter listens on a loopback callback, opens the authorization URL with a known Linux browser executable or displays the URL for manual opening, exchanges the one-time code inside the adapter process, validates token routing claims, and calls `GET /me` before any business operation.
 
 The access token stays in the adapter process. The rotating refresh credential is stored only in the operating-system keyring. The workspace registry contains identifiers and names only; it never contains credentials.
 
@@ -19,19 +19,28 @@ The plugin does not:
 The WSL user session needs all of the following:
 
 1. Node.js 18 or newer.
-2. A URL handler available to the adapter (`xdg-open`) that can return the loopback OAuth callback to the same WSL host.
+2. Either a supported Linux browser executable available through WSLg (`firefox`, `firefox-esr`, `google-chrome`, `chromium`, `chromium-browser`, or `microsoft-edge`) or a browser path for the manual URL that can return the callback to the WSL loopback listener.
 3. A functioning Secret Service implementation available on the user's D-Bus session, with the `secret-tool` command available.
 4. Network access to the documented OAuth issuer and MCP/API origin.
 
 Merely having a D-Bus session is not enough; an actual Secret Service provider must be present and unlocked.
 
-Run `inspect_runtime_capabilities` before starting interactive authorization. An automatically selected `headless` profile means the WSL host lacks evidence required for `wsl-desktop`; its diagnostics identify the missing browser-launch or Secret Service prerequisite without initiating OAuth.
+Run `inspect_runtime_capabilities` before starting interactive authorization. Inside WSL, `CONTENTTRAKER_BROWSER_MODE=auto` launches a known Linux browser directly when a display and executable are available; otherwise it selects `manual-url`. The adapter never invokes `xdg-open` in WSL, and `CONTENTTRAKER_BROWSER_MODE=system` is rejected there so Windows browser interoperability cannot be selected accidentally.
+
+For manual interaction:
+
+1. Call `begin_contenttraker_authorization`.
+2. Open the returned `authorizationUrl` inside the intended Linux isolation boundary before `expiresAt`.
+3. Call `get_contenttraker_authorization_status`, optionally with `waitSeconds` from 0 through 15, until it reports `authorized` or a terminal failure.
+4. Call `get_current_user` and verify the effective ContentTraker identity.
+
+The authorization URL contains one-time OAuth request parameters, but the code verifier, authorization code, access token, and refresh credential are never returned by the tool. `cancel_contenttraker_authorization` closes only a pending local listener; it does not revoke an issued credential.
 
 ## Fail-closed behavior
 
 If URL launch, loopback callback, native keyring loading, keyring access, token validation, `GET /me`, or host identity matching fails, the plugin stops at that layer. Do not work around the failure with a copied token, a committed credential, a desktop connector session, or a plaintext token cache.
 
-The current ContentTraker OAuth metadata advertises authorization-code and refresh-token grants. It does not advertise an OAuth device authorization grant. A headless WSL host with no usable browser bridge therefore has an authentication blocker until a supported browser/loopback path or device authorization flow is provided.
+The current ContentTraker OAuth metadata advertises authorization-code and refresh-token grants. It does not advertise an OAuth device authorization grant. A host that cannot open the displayed URL and route the callback to its loopback listener remains blocked until the authorization server provides device authorization or another supported flow.
 
 ## Host identity check
 

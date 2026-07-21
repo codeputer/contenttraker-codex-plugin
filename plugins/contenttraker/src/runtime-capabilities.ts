@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { resolveBrowserInteraction } from "./browser-interaction.js";
 import { resolveAdapterEnvironment } from "./environment-profile.js";
 import type {
   RuntimeCapabilitiesResult,
@@ -59,31 +60,33 @@ export function inspectRuntimeCapabilities(
 
   const authMode = env.CONTENTTRAKER_AUTH_MODE?.trim().toLowerCase() || "delegated";
   const serviceTokenConfigured = hasEnvironmentServiceToken(env, environmentProfile.status.name);
-  const delegatedReady = host.systemBrowserLauncherAvailable
-    && (!host.isWsl || host.wslNativeBrowserIsolationAvailable)
+  const delegatedInteractionReady = host.browserInteractionMode !== "invalid";
+  const delegatedReady = delegatedInteractionReady
     && host.linuxSecretServicePrerequisitesAvailable;
   const serviceReady = authMode === "service" && serviceTokenConfigured;
 
   const interaction: RuntimeCapability[] = [
     capability(
       "system-browser",
-      host.systemBrowserLauncherAvailable ? "available" : "blocked",
-      host.systemBrowserLauncherAvailable
+      host.browserInteractionMode === "system-browser" ? "available" : "blocked",
+      host.browserInteractionMode === "system-browser"
         ? undefined
-        : "No supported system browser launcher was found for this host.",
+        : "System-browser interaction is not selected for this host.",
     ),
     capability(
       "manual-authorization-url",
-      "future",
-      "The manual authorization URL provider is defined by Epic #2 but is not implemented yet.",
+      "available",
+      host.browserInteractionMode === "manual-url"
+        ? "Manual authorization URL interaction is selected for this host."
+        : "Manual authorization remains available through begin_contenttraker_authorization.",
     ),
     ...(host.isWsl
       ? [capability(
           "wsl-native-browser-isolation",
-          host.wslNativeBrowserIsolationAvailable ? "available" : "future",
+          host.wslNativeBrowserIsolationAvailable ? "available" : "blocked",
           host.wslNativeBrowserIsolationAvailable
             ? undefined
-            : "The current xdg-open launcher cannot prove that authorization remains inside WSL; Windows browser interoperability remains disabled by default.",
+            : "No supported WSL-native Linux browser launcher is selected; Windows browser interoperability remains disabled.",
         )]
       : []),
   ];
@@ -160,7 +163,7 @@ export function inspectRuntimeCapabilities(
     : authMode === "delegated"
       ? {
           authentication: "delegated-user-pkce" as const,
-          interaction: host.systemBrowserLauncherAvailable ? "system-browser" as const : "none" as const,
+          interaction: host.browserInteractionMode === "invalid" ? "none" as const : host.browserInteractionMode,
           credentialPersistence: host.linuxSecretServicePrerequisitesAvailable
             ? "linux-secret-service" as const
             : "none" as const,
@@ -231,15 +234,11 @@ export function detectRuntimeHostFacts(
   const graphicalSessionAvailable = platform === "win32" || platform === "darwin"
     ? !isCi && !isContainer
     : Boolean(env.DISPLAY?.trim() || env.WAYLAND_DISPLAY?.trim());
-  const systemBrowserLauncherAvailable = !isCi && !isContainer && (
-    platform === "win32"
-      ? commandAvailable("rundll32.exe")
-      : platform === "darwin"
-        ? commandAvailable("open")
-        : platform === "linux"
-          ? graphicalSessionAvailable && commandAvailable("xdg-open")
-          : false
-  );
+  const browserSelection = isCi || isContainer
+    ? { mode: "manual-url" as const }
+    : resolveBrowserInteraction(env, { platform, kernelRelease, commandAvailable });
+  const systemBrowserLauncherAvailable = browserSelection.mode === "system-browser"
+    || browserSelection.mode === "wsl-native";
   const linuxSecretToolAvailable = platform === "linux" && commandAvailable("secret-tool");
   const dbusSessionAvailable = platform === "linux" && Boolean(env.DBUS_SESSION_BUS_ADDRESS?.trim());
 
@@ -256,8 +255,9 @@ export function detectRuntimeHostFacts(
     isCi,
     graphicalSessionAvailable,
     dbusSessionAvailable,
+    browserInteractionMode: browserSelection.mode,
     systemBrowserLauncherAvailable,
-    wslNativeBrowserIsolationAvailable: false,
+    wslNativeBrowserIsolationAvailable: browserSelection.mode === "wsl-native",
     linuxSecretToolAvailable,
     linuxSecretServicePrerequisitesAvailable: linuxSecretToolAvailable && dbusSessionAvailable,
   };
@@ -306,11 +306,8 @@ function validateExplicitProfile(
 }
 
 function delegatedBlockedReason(host: RuntimeHostFacts): string {
-  if (!host.systemBrowserLauncherAvailable) {
-    return "Delegated PKCE authentication is blocked because no supported system browser launcher is available.";
-  }
-  if (host.isWsl && !host.wslNativeBrowserIsolationAvailable) {
-    return "Delegated PKCE authentication is blocked because the current launcher cannot prove WSL-native browser isolation.";
+  if (host.browserInteractionMode === "invalid") {
+    return "Delegated PKCE authentication is blocked because browser interaction configuration is invalid.";
   }
   if (!host.linuxSecretServicePrerequisitesAvailable) {
     return host.platform === "linux"

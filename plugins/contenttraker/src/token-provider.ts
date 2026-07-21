@@ -2,8 +2,13 @@ import { createHash } from "node:crypto";
 
 import { resolveAdapterEnvironment } from "./environment-profile.js";
 import { createCredentialHandle, OsKeyringCredentialStore, type SecureCredentialStore } from "./credential-store.js";
-import { ContentTrakerOAuthClient, type OAuthTokenResponse } from "./oauth-client.js";
+import {
+  ContentTrakerOAuthClient,
+  type OAuthAuthorizationSession,
+  type OAuthTokenResponse,
+} from "./oauth-client.js";
 import type {
+  AuthorizationFlowResult,
   ContentTrakerRequestSecurityContext,
   RequestSecurityDiagnostics,
   TokenStrategyStatus,
@@ -31,6 +36,12 @@ export interface ContentTrakerTokenProvider {
     context: ContentTrakerRequestSecurityContext,
     options?: { forceRefresh?: boolean; rejectedCredentialVersion?: string; signal?: AbortSignal },
   ): Promise<ContentTrakerAuthorizationSnapshot>;
+  beginAuthorization(context: ContentTrakerRequestSecurityContext): Promise<AuthorizationFlowResult>;
+  getAuthorizationStatus(
+    context: ContentTrakerRequestSecurityContext,
+    waitMilliseconds?: number,
+  ): Promise<AuthorizationFlowResult>;
+  cancelAuthorization(context: ContentTrakerRequestSecurityContext): Promise<AuthorizationFlowResult>;
   getSecurityDiagnostics(context: ContentTrakerRequestSecurityContext): RequestSecurityDiagnostics;
   recordEffectiveCaller(
     context: ContentTrakerRequestSecurityContext,
@@ -55,6 +66,13 @@ interface CachedCredential {
 interface EffectiveCaller {
   subjectId?: string;
   contentTrakerCorrelationId?: string;
+}
+
+interface DelegatedAuthorizationFlow {
+  session: OAuthAuthorizationSession;
+  status: "pending" | "authorized" | "failed" | "expired" | "cancelled";
+  diagnostic?: string;
+  completion: Promise<CachedCredential>;
 }
 
 export function createContentTrakerTokenProvider(
@@ -83,6 +101,7 @@ export class DelegatedContentTrakerTokenProvider implements ContentTrakerTokenPr
   private readonly loginFlights = new Map<string, Promise<CachedCredential>>();
   private readonly refreshFlights = new Map<string, Promise<CachedCredential>>();
   private readonly effectiveCallers = new Map<string, EffectiveCaller>();
+  private readonly authorizationFlows = new Map<string, DelegatedAuthorizationFlow>();
 
   constructor(
     private readonly credentialStore: SecureCredentialStore,
@@ -99,7 +118,10 @@ export class DelegatedContentTrakerTokenProvider implements ContentTrakerTokenPr
       source: "contenttraker-oauth-pkce",
       environmentTokenIgnored: hasAnyEnvironmentToken(this.env),
       credentialStore: "os-keyring",
-      authenticationPending: context ? this.loginFlights.has(sessionKey(context)) : false,
+      authenticationPending: context
+        ? this.loginFlights.has(sessionKey(context))
+          || this.authorizationFlows.get(sessionKey(context))?.status === "pending"
+        : false,
       subjectId: credential?.subjectId,
       tokenExpiryStatus: expiryStatus(credential?.expiresAt),
     };
@@ -135,6 +157,96 @@ export class DelegatedContentTrakerTokenProvider implements ContentTrakerTokenPr
       credentialVersion: credential.credentialVersion,
       authenticationMode: "delegated-user-pkce" as const,
     });
+  }
+
+  async beginAuthorization(context: ContentTrakerRequestSecurityContext): Promise<AuthorizationFlowResult> {
+    this.assertContextMatchesProfile(context);
+    const key = sessionKey(context);
+    const credential = this.credentialsBySession.get(key);
+    if (credential && expiryStatus(credential.expiresAt) === "valid") {
+      return { status: "authorized", interaction: interaction(this.oauthClient), diagnostics: [] };
+    }
+
+    const existing = this.authorizationFlows.get(key);
+    if (existing?.status === "pending") return authorizationFlowResult(existing);
+    if (existing) {
+      await existing.session.cancel().catch(() => undefined);
+      this.authorizationFlows.delete(key);
+    }
+
+    try {
+      const session = await this.oauthClient.beginAuthorization(context, true);
+      let flow!: DelegatedAuthorizationFlow;
+      const completion = (async () => {
+        try {
+          const response = await session.complete();
+          const created = await this.createCredential(context, response);
+          this.credentialsBySession.set(key, created);
+          flow.status = "authorized";
+          return created;
+        } catch (error) {
+          const failure = authorizationFailure(error);
+          flow.status = failure.status;
+          flow.diagnostic = failure.diagnostic;
+          throw error;
+        }
+      })();
+      flow = { session, status: "pending", completion };
+      this.authorizationFlows.set(key, flow);
+      void completion.catch(() => undefined);
+      return authorizationFlowResult(flow);
+    } catch (error) {
+      return {
+        status: "blocked",
+        interaction: interaction(this.oauthClient),
+        diagnostics: [authorizationFailure(error).diagnostic],
+      };
+    }
+  }
+
+  async getAuthorizationStatus(
+    context: ContentTrakerRequestSecurityContext,
+    waitMilliseconds = 0,
+  ): Promise<AuthorizationFlowResult> {
+    this.assertContextMatchesProfile(context);
+    const credential = this.credentialsBySession.get(sessionKey(context));
+    if (credential && expiryStatus(credential.expiresAt) === "valid") {
+      return { status: "authorized", interaction: interaction(this.oauthClient), diagnostics: [] };
+    }
+
+    const flow = this.authorizationFlows.get(sessionKey(context));
+    if (!flow) return { status: "idle", interaction: interaction(this.oauthClient), diagnostics: [] };
+
+    const boundedWait = Math.max(0, Math.min(waitMilliseconds, 15_000));
+    if (flow.status === "pending" && boundedWait > 0) {
+      await Promise.race([
+        flow.completion.catch(() => undefined),
+        delay(boundedWait),
+      ]);
+    }
+    return authorizationFlowResult(flow);
+  }
+
+  async cancelAuthorization(context: ContentTrakerRequestSecurityContext): Promise<AuthorizationFlowResult> {
+    this.assertContextMatchesProfile(context);
+    const key = sessionKey(context);
+    const flow = this.authorizationFlows.get(key);
+    const credential = this.credentialsBySession.get(key);
+    if (!flow) {
+      return {
+        status: credential ? "authorized" : "idle",
+        interaction: interaction(this.oauthClient),
+        diagnostics: [],
+      };
+    }
+    if (credential && expiryStatus(credential.expiresAt) === "valid") {
+      return { status: "authorized", interaction: interaction(this.oauthClient), diagnostics: [] };
+    }
+    if (flow.status !== "pending") return authorizationFlowResult(flow);
+    await flow.session.cancel();
+    flow.status = "cancelled";
+    flow.diagnostic = "ContentTraker authorization was cancelled locally.";
+    return authorizationFlowResult(flow);
   }
 
   getSecurityDiagnostics(context: ContentTrakerRequestSecurityContext): RequestSecurityDiagnostics {
@@ -174,6 +286,9 @@ export class DelegatedContentTrakerTokenProvider implements ContentTrakerTokenPr
     const credential = this.credentialsBySession.get(key);
     this.credentialsBySession.delete(key);
     this.effectiveCallers.delete(key);
+    const flow = this.authorizationFlows.get(key);
+    this.authorizationFlows.delete(key);
+    if (flow?.status === "pending") await flow.session.cancel().catch(() => undefined);
     if (credential) {
       await this.credentialStore.delete(credential.credentialHandle);
     }
@@ -186,6 +301,9 @@ export class DelegatedContentTrakerTokenProvider implements ContentTrakerTokenPr
     const key = sessionKey(context);
     const existing = this.loginFlights.get(key);
     if (existing) return await existing;
+
+    const authorizationFlow = this.authorizationFlows.get(key);
+    if (authorizationFlow?.status === "pending") return await authorizationFlow.completion;
 
     const flight = (async () => {
       const tokenResponse = await this.oauthClient.authorize(context, signal);
@@ -314,6 +432,20 @@ export class ServiceContentTrakerTokenProvider implements ContentTrakerTokenProv
     });
   }
 
+  async beginAuthorization(): Promise<AuthorizationFlowResult> {
+    return serviceAuthorizationBlocked();
+  }
+
+  async getAuthorizationStatus(): Promise<AuthorizationFlowResult> {
+    return this.getStatus().accessTokenPresent
+      ? { status: "authorized", diagnostics: [] }
+      : serviceAuthorizationBlocked();
+  }
+
+  async cancelAuthorization(): Promise<AuthorizationFlowResult> {
+    return serviceAuthorizationBlocked();
+  }
+
   getSecurityDiagnostics(context: ContentTrakerRequestSecurityContext): RequestSecurityDiagnostics {
     const caller = this.effectiveCallers.get(sessionKey(context));
     return {
@@ -352,6 +484,15 @@ class InvalidContentTrakerTokenProvider implements ContentTrakerTokenProvider {
   }
   async getAuthorizationHeader(): Promise<ContentTrakerAuthorizationSnapshot> {
     throw new Error("CONTENTTRAKER_AUTH_MODE must be delegated or service.");
+  }
+  async beginAuthorization(): Promise<AuthorizationFlowResult> {
+    return invalidAuthorizationMode();
+  }
+  async getAuthorizationStatus(): Promise<AuthorizationFlowResult> {
+    return invalidAuthorizationMode();
+  }
+  async cancelAuthorization(): Promise<AuthorizationFlowResult> {
+    return invalidAuthorizationMode();
   }
   getSecurityDiagnostics(context: ContentTrakerRequestSecurityContext): RequestSecurityDiagnostics {
     return {
@@ -440,4 +581,69 @@ function expiryStatus(expiresAt?: number): "missing" | "valid" | "expiring" | "e
 
 function nowSeconds(): number {
   return Math.floor(Date.now() / 1000);
+}
+
+function authorizationFlowResult(flow: DelegatedAuthorizationFlow): AuthorizationFlowResult {
+  return {
+    status: flow.status,
+    interaction: flow.session.interactionMode === "invalid" ? undefined : flow.session.interactionMode,
+    ...(flow.status === "pending"
+      ? {
+          authorizationUrl: flow.session.authorizationUrl,
+          redirectUri: flow.session.redirectUri,
+          expiresAt: flow.session.expiresAt,
+        }
+      : {}),
+    diagnostics: flow.diagnostic ? [flow.diagnostic] : [],
+  };
+}
+
+function authorizationFailure(error: unknown): {
+  status: "failed" | "expired" | "cancelled";
+  diagnostic: string;
+} {
+  const message = error instanceof Error ? error.message.toLowerCase() : "";
+  if (message.includes("timed out")) {
+    return {
+      status: "expired",
+      diagnostic: "ContentTraker authorization expired before the loopback callback completed.",
+    };
+  }
+  if (message.includes("cancelled")) {
+    return { status: "cancelled", diagnostic: "ContentTraker authorization was cancelled locally." };
+  }
+  if (message.includes("token endpoint")) {
+    return { status: "failed", diagnostic: "ContentTraker authorization-code exchange failed at the token endpoint." };
+  }
+  if (message.includes("browser") || message.includes("manual authorization") || message.includes("contenttraker_browser_mode")) {
+    return {
+      status: "failed",
+      diagnostic: "ContentTraker authorization interaction is unavailable for the configured host boundary.",
+    };
+  }
+  return { status: "failed", diagnostic: "ContentTraker delegated authorization failed." };
+}
+
+function interaction(
+  oauthClient: ContentTrakerOAuthClient,
+): "system-browser" | "manual-url" | "wsl-native" | undefined {
+  return oauthClient.interactionMode === "invalid" ? undefined : oauthClient.interactionMode;
+}
+
+function serviceAuthorizationBlocked(): AuthorizationFlowResult {
+  return {
+    status: "blocked",
+    diagnostics: ["Interactive authorization is unavailable when CONTENTTRAKER_AUTH_MODE=service."],
+  };
+}
+
+function invalidAuthorizationMode(): AuthorizationFlowResult {
+  return {
+    status: "blocked",
+    diagnostics: ["CONTENTTRAKER_AUTH_MODE must be delegated or service."],
+  };
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }

@@ -7,6 +7,7 @@ const linuxDesktop = facts({
   platform: "linux",
   graphicalSessionAvailable: true,
   dbusSessionAvailable: true,
+  browserInteractionMode: "system-browser",
   systemBrowserLauncherAvailable: true,
   linuxSecretToolAvailable: true,
   linuxSecretServicePrerequisitesAvailable: true,
@@ -25,6 +26,7 @@ const wslResult = inspectRuntimeCapabilities(
     isWsl: true,
     graphicalSessionAvailable: true,
     dbusSessionAvailable: true,
+    browserInteractionMode: "wsl-native",
     systemBrowserLauncherAvailable: true,
     wslNativeBrowserIsolationAvailable: true,
     linuxSecretToolAvailable: true,
@@ -48,14 +50,15 @@ const detectedWslFacts = detectRuntimeHostFacts(
   },
 );
 assert.equal(detectedWslFacts.isWsl, true);
-assert.equal(detectedWslFacts.systemBrowserLauncherAvailable, true);
+assert.equal(detectedWslFacts.browserInteractionMode, "manual-url");
+assert.equal(detectedWslFacts.systemBrowserLauncherAvailable, false);
 assert.equal(detectedWslFacts.linuxSecretServicePrerequisitesAvailable, true);
 assert.equal(detectedWslFacts.wslNativeBrowserIsolationAvailable, false);
 
 const detectedWslResult = inspectRuntimeCapabilities(delegatedEnv(), detectedWslFacts);
-assert.equal(detectedWslResult.selectedProfile, "wsl-desktop");
-assert.equal(detectedWslResult.status, "blocked");
-assert.match(detectedWslResult.diagnostics.join(" "), /WSL-native browser isolation/);
+assert.equal(detectedWslResult.selectedProfile, "headless");
+assert.equal(detectedWslResult.status, "ready");
+assert.equal(detectedWslResult.selectedStrategy.interaction, "manual-url");
 
 const detectedWindowsFacts = detectRuntimeHostFacts(
   { CI: "0" },
@@ -66,6 +69,7 @@ const detectedWindowsFacts = detectRuntimeHostFacts(
   },
 );
 assert.equal(detectedWindowsFacts.platform, "windows");
+assert.equal(detectedWindowsFacts.browserInteractionMode, "system-browser");
 assert.equal(detectedWindowsFacts.systemBrowserLauncherAvailable, true);
 
 const detectedContainerFacts = detectRuntimeHostFacts(
@@ -86,13 +90,14 @@ const headlessWsl = inspectRuntimeCapabilities(
 );
 assert.equal(headlessWsl.status, "blocked");
 assert.equal(headlessWsl.selectedProfile, "headless");
-assert.match(headlessWsl.diagnostics.join(" "), /browser launcher/);
+assert.match(headlessWsl.diagnostics.join(" "), /secret-tool/);
 
 const windowsResult = inspectRuntimeCapabilities(
   delegatedEnv(),
   facts({
     platform: "windows",
     graphicalSessionAvailable: true,
+    browserInteractionMode: "system-browser",
     systemBrowserLauncherAvailable: true,
   }),
 );
@@ -105,6 +110,7 @@ const macosResult = inspectRuntimeCapabilities(
   facts({
     platform: "macos",
     graphicalSessionAvailable: true,
+    browserInteractionMode: "system-browser",
     systemBrowserLauncherAvailable: true,
   }),
 );
@@ -188,6 +194,7 @@ function facts(overrides: Partial<RuntimeHostFacts> = {}): RuntimeHostFacts {
     isCi: false,
     graphicalSessionAvailable: false,
     dbusSessionAvailable: false,
+    browserInteractionMode: "manual-url",
     systemBrowserLauncherAvailable: false,
     wslNativeBrowserIsolationAvailable: false,
     linuxSecretToolAvailable: false,

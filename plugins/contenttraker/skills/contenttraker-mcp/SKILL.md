@@ -9,6 +9,8 @@ Use this plugin's local MCP tools. Do not reuse a ChatGPT connector session, req
 
 Call `inspect_runtime_capabilities` before authentication troubleshooting or host-specific setup. ContentTraker target environment and host runtime profile are independent; this read-only tool reports the selected profile and redacted host capability diagnostics without authenticating or calling ContentTraker.
 
+If delegated authentication is needed, call `begin_contenttraker_authorization`. When it returns `pending`, present its authorization URL to the user without rewriting it, then call `get_contenttraker_authorization_status` with a bounded `waitSeconds` value. Do not ask the user for an authorization code, token, verifier, cookie, or refresh credential. Use `cancel_contenttraker_authorization` only to close a pending local callback listener. After `authorized`, call `get_current_user`; authorization status alone does not prove the effective ContentTraker identity.
+
 Before any write:
 
 1. Call `get_current_user` and stop if it fails or the configured host identity does not match.
@@ -18,4 +20,4 @@ Before any write:
 
 Create assets as drafts unless the user explicitly authorizes another supported lifecycle state. Use a stable idempotency key for create and lifecycle writes.
 
-Staging is the default environment. The browser login page is not the API endpoint. Interactive authentication uses ContentTraker authorization code with PKCE and the OS keyring inside the host boundary. If the browser/loopback path or OS keyring is unavailable, report that exact layer and stop; never use plaintext credential storage or a copied connector credential.
+Staging is the default environment. The browser login page is not the API endpoint. Interactive authentication uses ContentTraker authorization code with PKCE and the OS keyring inside the host boundary. In WSL, the adapter launches only a known Linux browser executable or returns a manual URL; it never uses `xdg-open` or Windows browser interoperability. If the browser/loopback path or OS keyring is unavailable, report that exact layer and stop; never use plaintext credential storage or a copied connector credential.

@@ -15,10 +15,10 @@ The plugin package is installable and its MCP process starts without the private
 An isolated WSL host must also provide:
 
 - Node.js 18 or newer;
-- a browser/URL handler that can complete a loopback OAuth redirect inside the host boundary; and
+- either a Linux browser available through WSLg or a way to open a displayed manual authorization URL in a browser that can return to the WSL loopback callback; and
 - a working Linux Secret Service keyring for the host user.
 
-If either the browser bridge or keyring is unavailable, authentication stops. There is no bearer-token argument, plaintext credential file, browser-cookie import, or connector-session fallback. See [WSL authentication](docs/wsl-authentication.md).
+Windows browser interoperability remains disabled inside WSL. If a WSL-native browser is unavailable, the plugin returns a manual URL and keeps the loopback listener alive while authorization is pending. If the browser/loopback path or keyring is unavailable, authentication stops. There is no bearer-token argument, plaintext credential file, browser-cookie import, or connector-session fallback. See [WSL authentication](docs/wsl-authentication.md).
 
 ## Install a reviewed release
 
@@ -36,6 +36,8 @@ Start a new Codex session after installation so the plugin tools and skill are l
 The plugin treats the ContentTraker target (`staging` or `production`) separately from the host runtime (`windows-desktop`, `macos-desktop`, `linux-desktop`, `wsl-desktop`, `headless`, or `container`). `CONTENTTRAKER_RUNTIME_PROFILE` defaults to `auto` and selects a desktop profile only when matching host capability evidence exists.
 
 Use the unauthenticated `inspect_runtime_capabilities` tool before authentication troubleshooting. It reports the selected profile, available interaction and credential providers, session-restoration support, and redacted blocking diagnostics without calling ContentTraker or exposing credentials. See [Runtime capabilities](docs/runtime-capabilities.md).
+
+Interactive authorization supports platform browser launch on Windows, macOS, and non-WSL Linux; direct Linux-browser launch inside WSL; and a manual URL flow for headless or isolated hosts. Use `begin_contenttraker_authorization`, then poll `get_contenttraker_authorization_status` (optionally waiting up to 15 seconds per call). Use `cancel_contenttraker_authorization` to close a pending local callback listener. See [Authorization interaction](docs/authorization-interaction.md).
 
 ## Authentication and host identity policy
 

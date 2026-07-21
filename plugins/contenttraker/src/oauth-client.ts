@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
-import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 
+import { createBrowserLauncher, type BrowserInteractionMode, type BrowserLauncher } from "./browser-interaction.js";
 import type { ContentTrakerRequestSecurityContext } from "./types.js";
 
 const CLIENT_ID = "codex-mcp";
@@ -23,47 +23,70 @@ export interface OAuthTokenResponse {
   resource: string;
 }
 
-export interface BrowserLauncher {
-  open(url: URL): Promise<void>;
-}
-
 export interface OAuthTransport {
   exchangeToken(tokenEndpoint: URL, parameters: URLSearchParams): Promise<OAuthTokenResponse>;
+}
+
+export interface OAuthAuthorizationSession {
+  authorizationUrl: string;
+  redirectUri: string;
+  expiresAt: string;
+  interactionMode: BrowserInteractionMode;
+  complete(): Promise<OAuthTokenResponse>;
+  cancel(): Promise<void>;
 }
 
 export class ContentTrakerOAuthClient {
   constructor(
     private readonly issuer: string,
-    private readonly browserLauncher: BrowserLauncher = new SystemBrowserLauncher(),
+    private readonly browserLauncher: BrowserLauncher = createBrowserLauncher(),
     private readonly transport: OAuthTransport = new FetchOAuthTransport(),
+    private readonly authorizationTimeoutMs = 180_000,
   ) {}
+
+  get interactionMode(): BrowserInteractionMode {
+    return this.browserLauncher.mode;
+  }
 
   async authorize(
     securityContext: ContentTrakerRequestSecurityContext,
     signal?: AbortSignal,
   ): Promise<OAuthTokenResponse> {
+    if (this.browserLauncher.mode === "manual-url") {
+      throw new Error(
+        "Manual authorization is configured. Call begin_contenttraker_authorization and open the returned URL inside the intended host boundary.",
+      );
+    }
+    const session = await this.beginAuthorization(securityContext, true, signal);
+    return await session.complete();
+  }
+
+  async beginAuthorization(
+    securityContext: ContentTrakerRequestSecurityContext,
+    launchBrowser = true,
+    signal?: AbortSignal,
+  ): Promise<OAuthAuthorizationSession> {
     const issuer = validateHttpsOrigin(this.issuer, "OAuth issuer");
     const authorizationEndpoint = new URL("/oauth/authorize", issuer);
     const tokenEndpoint = new URL("/oauth/token", issuer);
     const verifier = randomBytes(64).toString("base64url");
     const challenge = createHash("sha256").update(verifier).digest("base64url");
     const state = randomBytes(32).toString("base64url");
-    const callback = await createLoopbackCallback(state, signal);
+    const callback = await createLoopbackCallback(state, this.authorizationTimeoutMs, signal);
+    const authorizationUrl = new URL(authorizationEndpoint);
+    authorizationUrl.search = new URLSearchParams({
+      response_type: "code",
+      client_id: CLIENT_ID,
+      redirect_uri: callback.redirectUri,
+      scope: DEFAULT_SCOPES.join(" "),
+      state,
+      code_challenge: challenge,
+      code_challenge_method: "S256",
+      resource: securityContext.tokenAudience,
+    }).toString();
 
-    try {
-      const authorizationUrl = new URL(authorizationEndpoint);
-      authorizationUrl.search = new URLSearchParams({
-        response_type: "code",
-        client_id: CLIENT_ID,
-        redirect_uri: callback.redirectUri,
-        scope: DEFAULT_SCOPES.join(" "),
-        state,
-        code_challenge: challenge,
-        code_challenge_method: "S256",
-        resource: securityContext.tokenAudience,
-      }).toString();
-
-      await this.browserLauncher.open(authorizationUrl);
+    const completion = (async () => {
+      try {
       const code = await callback.authorizationCode;
       return await this.transport.exchangeToken(tokenEndpoint, new URLSearchParams({
         grant_type: "authorization_code",
@@ -73,9 +96,31 @@ export class ContentTrakerOAuthClient {
         code_verifier: verifier,
         resource: securityContext.tokenAudience,
       }));
-    } finally {
-      await callback.close();
+      } finally {
+        await callback.close();
+      }
+    })();
+    void completion.catch(() => undefined);
+
+    const session: OAuthAuthorizationSession = {
+      authorizationUrl: authorizationUrl.toString(),
+      redirectUri: callback.redirectUri,
+      expiresAt: new Date(Date.now() + this.authorizationTimeoutMs).toISOString(),
+      interactionMode: this.browserLauncher.mode,
+      complete: async () => await completion,
+      cancel: async () => await callback.cancel(),
+    };
+
+    if (launchBrowser && this.browserLauncher.mode !== "manual-url") {
+      try {
+        await this.browserLauncher.open(authorizationUrl);
+      } catch (error) {
+        await session.cancel();
+        throw error;
+      }
     }
+
+    return session;
   }
 
   async refresh(
@@ -120,30 +165,14 @@ class FetchOAuthTransport implements OAuthTransport {
   }
 }
 
-class SystemBrowserLauncher implements BrowserLauncher {
-  async open(url: URL): Promise<void> {
-    const command = process.platform === "win32"
-      ? { file: "rundll32.exe", args: ["url.dll,FileProtocolHandler", url.toString()] }
-      : process.platform === "darwin"
-        ? { file: "open", args: [url.toString()] }
-        : { file: "xdg-open", args: [url.toString()] };
-
-    await new Promise<void>((resolve, reject) => {
-      const child = spawn(command.file, command.args, { detached: true, stdio: "ignore", windowsHide: true });
-      child.once("error", () => reject(new Error("ContentTraker OAuth browser launch failed.")));
-      child.once("spawn", () => {
-        child.unref();
-        resolve();
-      });
-    });
-  }
-}
-
-async function createLoopbackCallback(state: string, signal?: AbortSignal): Promise<{
+async function createLoopbackCallback(state: string, timeoutMs: number, signal?: AbortSignal): Promise<{
   redirectUri: string;
   authorizationCode: Promise<string>;
   close: () => Promise<void>;
+  cancel: () => Promise<void>;
 }> {
+  let settled = false;
+  let closed = false;
   let resolveCode!: (code: string) => void;
   let rejectCode!: (error: Error) => void;
   const authorizationCode = new Promise<string>((resolve, reject) => {
@@ -167,11 +196,17 @@ async function createLoopbackCallback(state: string, signal?: AbortSignal): Prom
 
       response.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
       response.end("ContentTraker authorization succeeded. Return to Codex.");
-      resolveCode(code);
+      if (!settled) {
+        settled = true;
+        resolveCode(code);
+      }
     } catch {
       response.writeHead(400, { "content-type": "text/plain; charset=utf-8" });
       response.end("ContentTraker authorization callback failed.");
-      rejectCode(new Error("ContentTraker OAuth callback validation failed."));
+      if (!settled) {
+        settled = true;
+        rejectCode(new Error("ContentTraker OAuth callback validation failed."));
+      }
     }
   });
 
@@ -186,16 +221,37 @@ async function createLoopbackCallback(state: string, signal?: AbortSignal): Prom
     throw new Error("ContentTraker OAuth loopback callback could not bind to a local port.");
   }
 
-  const timeout = setTimeout(() => rejectCode(new Error("ContentTraker OAuth authorization timed out.")), 180_000);
+  const timeout = setTimeout(() => {
+    if (!settled) {
+      settled = true;
+      rejectCode(new Error("ContentTraker OAuth authorization timed out."));
+    }
+  }, timeoutMs);
   timeout.unref();
-  signal?.addEventListener("abort", () => rejectCode(new Error("ContentTraker OAuth authorization was cancelled.")), { once: true });
+  const abort = () => {
+    if (!settled) {
+      settled = true;
+      rejectCode(new Error("ContentTraker OAuth authorization was cancelled."));
+    }
+  };
+  signal?.addEventListener("abort", abort, { once: true });
+
+  const close = async () => {
+    if (closed) return;
+    closed = true;
+    clearTimeout(timeout);
+    signal?.removeEventListener("abort", abort);
+    if (!server.listening) return;
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  };
 
   return {
     redirectUri: `http://127.0.0.1:${address.port}/oauth/callback`,
     authorizationCode,
-    close: async () => {
-      clearTimeout(timeout);
-      await new Promise<void>((resolve) => server.close(() => resolve()));
+    close,
+    cancel: async () => {
+      abort();
+      await close();
     },
   };
 }
