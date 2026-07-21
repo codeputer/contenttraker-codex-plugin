@@ -20,7 +20,7 @@ The WSL user session needs all of the following:
 
 1. Node.js 18 or newer.
 2. A URL handler available to the adapter (`xdg-open`) that can return the loopback OAuth callback to the same WSL host.
-3. A functioning Secret Service implementation available on the user's D-Bus session, plus the `@napi-rs/keyring` Linux runtime package.
+3. A functioning Secret Service implementation available on the user's D-Bus session, with the `secret-tool` command available.
 4. Network access to the documented OAuth issuer and MCP/API origin.
 
 Merely having a D-Bus session is not enough; an actual Secret Service provider must be present and unlocked.

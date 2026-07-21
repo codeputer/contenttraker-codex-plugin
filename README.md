@@ -17,7 +17,7 @@ If either the browser bridge or keyring is unavailable, authentication stops. Th
 ## Install a reviewed release
 
 ```bash
-codex plugin marketplace add https://github.com/codeputer/contenttraker-codex-plugin.git --ref v0.1.0
+codex plugin marketplace add https://github.com/codeputer/contenttraker-codex-plugin.git --ref v0.1.1
 codex plugin marketplace list
 codex plugin list
 codex plugin add contenttraker@contenttraker
@@ -66,7 +66,7 @@ Pin a new reviewed tag by replacing the marketplace snapshot:
 ```bash
 codex plugin remove contenttraker@contenttraker
 codex plugin marketplace remove contenttraker
-codex plugin marketplace add https://github.com/codeputer/contenttraker-codex-plugin.git --ref v0.1.0
+codex plugin marketplace add https://github.com/codeputer/contenttraker-codex-plugin.git --ref v0.1.1
 codex plugin add contenttraker@contenttraker
 ```
 
@@ -89,7 +89,7 @@ npm ci
 npm test
 ```
 
-The committed `dist/server.mjs` bundles the MCP SDK and validation dependencies so Codex can start the adapter without running `npm install`. The native keyring package is loaded only when delegated authentication begins; it must be available with a working OS keyring on authenticated hosts.
+The committed `dist/server.mjs` bundles the runtime JavaScript so Codex can start the adapter without running `npm install`. Delegated authentication uses the WSL user's Secret Service through `secret-tool`; no native Node package is downloaded at install time.
 
 ## Security and licence
 

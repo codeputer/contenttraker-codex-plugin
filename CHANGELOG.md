@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.1 - 2026-07-21
+
+- Makes the WSL runtime self-contained by using Linux Secret Service through `secret-tool`; no `npm` or native Node keyring package is required after marketplace installation.
+- Retains fail-closed behavior when the host has no Secret Service provider or browser/loopback path.
+
 ## 0.1.0 - 2026-07-21
 
 - Adds the public `contenttraker` Codex marketplace package.

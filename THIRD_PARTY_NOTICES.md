@@ -4,7 +4,6 @@ The built adapter includes or depends on the following open-source packages. The
 
 - `@modelcontextprotocol/sdk` — MIT
 - `zod` — MIT
-- `@napi-rs/keyring` and its platform packages — MIT
 - `esbuild` — MIT (build only)
 - `typescript` — Apache-2.0 (build only)
 
