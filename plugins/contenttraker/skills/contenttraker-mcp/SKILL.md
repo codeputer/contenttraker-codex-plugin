@@ -7,6 +7,8 @@ description: Use the local ContentTraker adapter to verify identity, resolve wor
 
 Use this plugin's local MCP tools. Do not reuse a ChatGPT connector session, request bearer tokens, inspect browser cookies, or require a direct remote MCP registration.
 
+Call `inspect_runtime_capabilities` before authentication troubleshooting or host-specific setup. ContentTraker target environment and host runtime profile are independent; this read-only tool reports the selected profile and redacted host capability diagnostics without authenticating or calling ContentTraker.
+
 Before any write:
 
 1. Call `get_current_user` and stop if it fails or the configured host identity does not match.

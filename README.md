@@ -31,6 +31,12 @@ codex plugin add contenttraker@contenttraker
 
 Start a new Codex session after installation so the plugin tools and skill are loaded.
 
+## Cross-platform runtime capabilities
+
+The plugin treats the ContentTraker target (`staging` or `production`) separately from the host runtime (`windows-desktop`, `macos-desktop`, `linux-desktop`, `wsl-desktop`, `headless`, or `container`). `CONTENTTRAKER_RUNTIME_PROFILE` defaults to `auto` and selects a desktop profile only when matching host capability evidence exists.
+
+Use the unauthenticated `inspect_runtime_capabilities` tool before authentication troubleshooting. It reports the selected profile, available interaction and credential providers, session-restoration support, and redacted blocking diagnostics without calling ContentTraker or exposing credentials. See [Runtime capabilities](docs/runtime-capabilities.md).
+
 ## Authentication and host identity policy
 
 The staging sign-in page is:

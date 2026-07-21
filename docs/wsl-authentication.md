@@ -25,6 +25,8 @@ The WSL user session needs all of the following:
 
 Merely having a D-Bus session is not enough; an actual Secret Service provider must be present and unlocked.
 
+Run `inspect_runtime_capabilities` before starting interactive authorization. An automatically selected `headless` profile means the WSL host lacks evidence required for `wsl-desktop`; its diagnostics identify the missing browser-launch or Secret Service prerequisite without initiating OAuth.
+
 ## Fail-closed behavior
 
 If URL launch, loopback callback, native keyring loading, keyring access, token validation, `GET /me`, or host identity matching fails, the plugin stops at that layer. Do not work around the failure with a copied token, a committed credential, a desktop connector session, or a plaintext token cache.

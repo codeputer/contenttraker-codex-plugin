@@ -277,6 +277,20 @@ try {
     ),
   );
 
+  const runtimeCapabilities = await callTool({
+    name: "inspect_runtime_capabilities",
+    env: {
+      CONTENTTRAKER_RUNTIME_PROFILE: "headless",
+      CONTENTTRAKER_ENVIRONMENT: "staging",
+      CONTENTTRAKER_STAGING_ACCESS_TOKEN: "test-staging-token",
+    },
+    arguments: {},
+  });
+  assert.equal(runtimeCapabilities.status, "ready");
+  assert.equal(runtimeCapabilities.selectedProfile, "headless");
+  assert.equal(runtimeCapabilities.contentTrakerEnvironment.name, "staging");
+  assert.equal(JSON.stringify(runtimeCapabilities).includes("test-staging-token"), false);
+
   const unconfigured = await callTool({
     name: "resolve_contenttraker_context",
     env: {
@@ -695,6 +709,7 @@ async function callTool({ name, env, arguments: toolArguments }) {
     tools.some((tool) => tool.name === "resolve_contenttraker_context"),
     true,
   );
+  assert.equal(tools.some((tool) => tool.name === "inspect_runtime_capabilities"), true);
   assert.equal(tools.some((tool) => tool.name === "get_current_user"), true);
   assert.equal(tools.some((tool) => tool.name === "list_workspaces"), true);
   assert.equal(
@@ -812,6 +827,7 @@ function cleanEnv(overrides) {
   };
   const keys = [
     "CONTENTTRAKER_ENVIRONMENT",
+    "CONTENTTRAKER_RUNTIME_PROFILE",
     "CONTENTTRAKER_API_BASE_URL",
     "CONTENTTRAKER_STAGING_API_BASE_URL",
     "CONTENTTRAKER_PRODUCTION_API_BASE_URL",

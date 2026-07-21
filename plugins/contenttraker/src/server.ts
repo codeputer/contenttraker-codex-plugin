@@ -7,6 +7,7 @@ import { appendDigitalAssetUploadChunk } from "./tools/append-digital-asset-uplo
 import { beginDigitalAssetUpload } from "./tools/begin-digital-asset-upload.js";
 import { completeDigitalAssetUpload } from "./tools/complete-digital-asset-upload.js";
 import { inspectContentTrakerApiContract } from "./tools/inspect-contenttraker-api-contract.js";
+import { inspectContentTrakerRuntimeCapabilities } from "./tools/inspect-runtime-capabilities.js";
 import { getDigitalAsset } from "./tools/get-digital-asset.js";
 import { listDigitalAssetTypes } from "./tools/list-digital-asset-types.js";
 import { probeContentTrakerApiReadiness } from "./tools/probe-contenttraker-api-readiness.js";
@@ -24,6 +25,29 @@ const server = new McpServer({
   name: "contenttraker",
   version: "0.1.2",
 });
+
+server.registerTool(
+  "inspect_runtime_capabilities",
+  {
+    title: "Inspect ContentTraker Runtime Capabilities",
+    description:
+      "Report the host runtime profile and available authentication, interaction, credential persistence, and session-restoration capabilities without authenticating or calling ContentTraker.",
+    inputSchema: {},
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  },
+  async () => {
+    const result = inspectContentTrakerRuntimeCapabilities();
+    return {
+      content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+      structuredContent: result as unknown as Record<string, unknown>,
+    };
+  },
+);
 
 server.registerTool(
   "get_current_user",

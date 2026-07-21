@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Adds an independent host runtime capability model and unauthenticated `inspect_runtime_capabilities` tool for Windows, macOS, Linux, WSL, headless, container, and CI profile selection.
+- Reports current, blocked, future, and externally dependent authentication, interaction, credential-persistence, and cross-task restoration capabilities without exposing credentials.
+
 ## 0.1.2 - 2026-07-21
 
 - Records Richard Reukema (`richard@phoenixbussolutions.com`) as the repository creator and release-publishing identity.

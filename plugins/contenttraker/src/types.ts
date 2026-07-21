@@ -1,5 +1,64 @@
 export type ContentTrakerEnvironment = "staging" | "production";
 
+export type RuntimeProfileName =
+  | "auto"
+  | "windows-desktop"
+  | "macos-desktop"
+  | "linux-desktop"
+  | "wsl-desktop"
+  | "headless"
+  | "container";
+
+export type SelectedRuntimeProfileName = Exclude<RuntimeProfileName, "auto">;
+
+export type RuntimeCapabilityStatus = "available" | "blocked" | "future" | "external";
+
+export interface RuntimeHostFacts {
+  platform: "windows" | "macos" | "linux" | "other";
+  isWsl: boolean;
+  isContainer: boolean;
+  isCi: boolean;
+  graphicalSessionAvailable: boolean;
+  dbusSessionAvailable: boolean;
+  systemBrowserLauncherAvailable: boolean;
+  wslNativeBrowserIsolationAvailable: boolean;
+  linuxSecretToolAvailable: boolean;
+  linuxSecretServicePrerequisitesAvailable: boolean;
+}
+
+export interface RuntimeCapability {
+  name: string;
+  status: RuntimeCapabilityStatus;
+  reason?: string;
+}
+
+export interface RuntimeStrategySelection {
+  authentication: "delegated-user-pkce" | "service-environment-token" | "invalid";
+  interaction: "system-browser" | "none";
+  credentialPersistence: "linux-secret-service" | "environment-service-token" | "none";
+  crossTaskRestoration: boolean;
+}
+
+export interface RuntimeCapabilitiesResult {
+  status: "ready" | "blocked" | "invalid";
+  contentTrakerEnvironment: {
+    requestedName: string;
+    name?: ContentTrakerEnvironment;
+    valid: boolean;
+  };
+  requestedProfile: string;
+  selectedProfile?: SelectedRuntimeProfileName;
+  host: RuntimeHostFacts;
+  selectedStrategy: RuntimeStrategySelection;
+  capabilities: {
+    interaction: RuntimeCapability[];
+    authentication: RuntimeCapability[];
+    credentialPersistence: RuntimeCapability[];
+    sessionRestoration: RuntimeCapability[];
+  };
+  diagnostics: string[];
+}
+
 export type ContextResolutionStatus =
   | "resolved"
   | "defaulted"

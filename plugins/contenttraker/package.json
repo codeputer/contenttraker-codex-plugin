@@ -8,7 +8,8 @@
     "build": "tsc --noEmit && esbuild src/server.ts --bundle --minify --platform=node --format=esm --target=node18 --outfile=dist/server.mjs",
     "smoke": "npm run build && node tests/smoke.mjs",
     "auth-concurrency": "tsc --noEmit -p tsconfig.tests.json && esbuild tests/auth-concurrency.ts --bundle --platform=node --format=esm --target=node18 --outfile=node_modules/.cache/contenttraker-auth-concurrency.mjs && node node_modules/.cache/contenttraker-auth-concurrency.mjs",
-    "test": "npm run smoke && npm run auth-concurrency"
+    "runtime-capabilities": "tsc --noEmit -p tsconfig.tests.json && esbuild tests/runtime-capabilities.ts --bundle --platform=node --format=esm --target=node18 --outfile=node_modules/.cache/contenttraker-runtime-capabilities.mjs && node node_modules/.cache/contenttraker-runtime-capabilities.mjs",
+    "test": "npm run smoke && npm run auth-concurrency && npm run runtime-capabilities"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
