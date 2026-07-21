@@ -173,7 +173,14 @@ function providerFor(
     { CONTENTTRAKER_BROWSER_MODE: "manual" },
     { platform: "linux", kernelRelease: "generic-linux", commandAvailable: () => false },
   );
-  const oauthClient = new ContentTrakerOAuthClient(issuer, launcher, transport, timeoutMs, testMetadataResolver());
+  const oauthClient = new ContentTrakerOAuthClient(
+    issuer,
+    launcher,
+    transport,
+    timeoutMs,
+    testMetadataResolver(),
+    delegatedEnvironment(),
+  );
   return new DelegatedContentTrakerTokenProvider(store, oauthClient, environment);
 }
 

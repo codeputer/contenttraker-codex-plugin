@@ -5,6 +5,7 @@ import { createBrowserLauncher, type BrowserInteractionMode, type BrowserLaunche
 import {
   CONTENTTRAKER_OAUTH_SCOPES,
   ContentTrakerOAuthMetadataResolver,
+  type ResolvedOAuthMetadata,
 } from "./oauth-metadata.js";
 import type { ContentTrakerRequestSecurityContext } from "./types.js";
 
@@ -20,13 +21,60 @@ export interface OAuthTokenResponse {
 
 export interface OAuthTransport {
   exchangeToken(tokenEndpoint: URL, parameters: URLSearchParams): Promise<OAuthTokenResponse>;
+  beginDeviceAuthorization?(
+    deviceAuthorizationEndpoint: URL,
+    parameters: URLSearchParams,
+    signal?: AbortSignal,
+  ): Promise<OAuthDeviceAuthorizationResponse>;
+  pollDeviceToken?(
+    tokenEndpoint: URL,
+    parameters: URLSearchParams,
+    signal?: AbortSignal,
+  ): Promise<OAuthDeviceTokenPollResult>;
 }
+
+export interface OAuthDeviceAuthorizationResponse {
+  deviceCode: string;
+  userCode: string;
+  verificationUri: string;
+  verificationUriComplete?: string;
+  expiresInSeconds: number;
+  intervalSeconds: number;
+}
+
+export type OAuthDeviceTokenPollResult =
+  | { status: "pending" | "slow-down" }
+  | { status: "denied" | "expired" }
+  | { status: "authorized"; token: OAuthTokenResponse };
+
+export type OAuthInteractionMode = BrowserInteractionMode | "device-code";
+
+export interface OAuthDevicePollTiming {
+  secondsToMilliseconds: number;
+  minimumIntervalMilliseconds: number;
+  slowDownIncrementMilliseconds: number;
+}
+
+type DelegatedFlow = "authorization-code" | "device-code";
+
+const DEVICE_GRANT = "urn:ietf:params:oauth:grant-type:device_code";
+const MAXIMUM_DEVICE_LIFETIME_SECONDS = 900;
+const MAXIMUM_DEVICE_POLL_INTERVAL_SECONDS = 60;
+const DEFAULT_DEVICE_POLL_INTERVAL_SECONDS = 5;
+const DEFAULT_DEVICE_POLL_TIMING: OAuthDevicePollTiming = {
+  secondsToMilliseconds: 1_000,
+  minimumIntervalMilliseconds: 1_000,
+  slowDownIncrementMilliseconds: 5_000,
+};
 
 export interface OAuthAuthorizationSession {
   authorizationUrl: string;
-  redirectUri: string;
+  redirectUri?: string;
+  verificationUri?: string;
+  userCode?: string;
+  intervalSeconds?: number;
   expiresAt: string;
-  interactionMode: BrowserInteractionMode;
+  interactionMode: OAuthInteractionMode;
   complete(): Promise<OAuthTokenResponse>;
   cancel(): Promise<void>;
 }
@@ -36,8 +84,10 @@ export class ContentTrakerOAuthClient {
     private readonly issuer: string,
     private readonly browserLauncher: BrowserLauncher = createBrowserLauncher(),
     private readonly transport: OAuthTransport = new FetchOAuthTransport(),
-    private readonly authorizationTimeoutMs = 180_000,
+    private readonly authorizationTimeoutMs = 600_000,
     private readonly metadataResolver = new ContentTrakerOAuthMetadataResolver(),
+    private readonly env: NodeJS.ProcessEnv = process.env,
+    private readonly devicePollTiming: OAuthDevicePollTiming = DEFAULT_DEVICE_POLL_TIMING,
   ) {}
 
   get interactionMode(): BrowserInteractionMode {
@@ -48,7 +98,9 @@ export class ContentTrakerOAuthClient {
     securityContext: ContentTrakerRequestSecurityContext,
     signal?: AbortSignal,
   ): Promise<OAuthTokenResponse> {
-    if (this.browserLauncher.mode === "manual-url") {
+    const metadata = await this.metadataResolver.resolve(this.issuer, securityContext.tokenAudience);
+    const delegatedFlow = resolveDelegatedFlow(this.env, this.browserLauncher.mode, metadata);
+    if (delegatedFlow === "authorization-code" && this.browserLauncher.mode === "manual-url") {
       throw new Error(
         "Manual authorization is configured. Call begin_contenttraker_authorization and open the returned URL inside the intended host boundary.",
       );
@@ -63,6 +115,10 @@ export class ContentTrakerOAuthClient {
     signal?: AbortSignal,
   ): Promise<OAuthAuthorizationSession> {
     const metadata = await this.metadataResolver.resolve(this.issuer, securityContext.tokenAudience);
+    const delegatedFlow = resolveDelegatedFlow(this.env, this.browserLauncher.mode, metadata);
+    if (delegatedFlow === "device-code") {
+      return await this.beginDeviceAuthorization(metadata, securityContext, launchBrowser, signal);
+    }
     const authorizationEndpoint = new URL(metadata.authorizationEndpoint);
     const tokenEndpoint = new URL(metadata.tokenEndpoint);
     const verifier = randomBytes(64).toString("base64url");
@@ -119,6 +175,112 @@ export class ContentTrakerOAuthClient {
     return session;
   }
 
+  private async beginDeviceAuthorization(
+    metadata: ResolvedOAuthMetadata,
+    securityContext: ContentTrakerRequestSecurityContext,
+    launchBrowser: boolean,
+    signal?: AbortSignal,
+  ): Promise<OAuthAuthorizationSession> {
+    if (!metadata.deviceAuthorizationAvailable || !metadata.deviceAuthorizationEndpoint) {
+      throw new Error("ContentTraker OAuth metadata does not advertise device authorization.");
+    }
+    if (!this.transport.beginDeviceAuthorization || !this.transport.pollDeviceToken) {
+      throw new Error("The ContentTraker device authorization provider is unavailable.");
+    }
+
+    const response = await this.transport.beginDeviceAuthorization(
+      new URL(metadata.deviceAuthorizationEndpoint),
+      new URLSearchParams({
+        client_id: CONTENTTRAKER_OAUTH_CLIENT_ID,
+        scope: CONTENTTRAKER_OAUTH_SCOPES.join(" "),
+        resource: securityContext.tokenAudience,
+      }),
+      signal,
+    );
+    const lifetimeMilliseconds = Math.min(
+      validatePositiveNumber(response.expiresInSeconds, "device authorization expiry") * 1_000,
+      MAXIMUM_DEVICE_LIFETIME_SECONDS * 1_000,
+      Math.max(1, this.authorizationTimeoutMs),
+    );
+    let intervalMilliseconds = Math.max(
+      this.devicePollTiming.minimumIntervalMilliseconds,
+      validatePositiveNumber(response.intervalSeconds, "device polling interval")
+        * this.devicePollTiming.secondsToMilliseconds,
+    );
+    if (intervalMilliseconds > MAXIMUM_DEVICE_POLL_INTERVAL_SECONDS * 1_000) {
+      throw new Error("ContentTraker OAuth device polling interval exceeds the supported bound.");
+    }
+    const expiresAtMilliseconds = Date.now() + lifetimeMilliseconds;
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted) abort();
+    const pollDeviceToken = this.transport.pollDeviceToken.bind(this.transport);
+
+    const completion = (async () => {
+      try {
+        while (Date.now() < expiresAtMilliseconds) {
+          await abortableDelay(intervalMilliseconds, controller.signal);
+          if (Date.now() >= expiresAtMilliseconds) break;
+          const result = await pollDeviceToken(
+            new URL(metadata.tokenEndpoint),
+            new URLSearchParams({
+              grant_type: DEVICE_GRANT,
+              device_code: response.deviceCode,
+              client_id: CONTENTTRAKER_OAUTH_CLIENT_ID,
+              resource: securityContext.tokenAudience,
+            }),
+            controller.signal,
+          );
+          if (result.status === "authorized") {
+            return validateTokenResponse(result.token, securityContext.tokenAudience);
+          }
+          if (result.status === "slow-down") {
+            const slowedInterval = intervalMilliseconds + this.devicePollTiming.slowDownIncrementMilliseconds;
+            if (slowedInterval > MAXIMUM_DEVICE_POLL_INTERVAL_SECONDS * 1_000) {
+              throw new Error("ContentTraker OAuth device polling interval exceeded the supported bound.");
+            }
+            intervalMilliseconds = slowedInterval;
+            continue;
+          }
+          if (result.status === "denied") {
+            throw new Error("ContentTraker OAuth device authorization was denied.");
+          }
+          if (result.status === "expired") {
+            throw new Error("ContentTraker OAuth device authorization expired.");
+          }
+        }
+        throw new Error("ContentTraker OAuth device authorization timed out.");
+      } finally {
+        signal?.removeEventListener("abort", abort);
+      }
+    })();
+    void completion.catch(() => undefined);
+
+    const authorizationUrl = response.verificationUriComplete ?? response.verificationUri;
+    const session: OAuthAuthorizationSession = {
+      authorizationUrl,
+      verificationUri: response.verificationUri,
+      userCode: response.userCode,
+      intervalSeconds: intervalMilliseconds / 1_000,
+      expiresAt: new Date(expiresAtMilliseconds).toISOString(),
+      interactionMode: "device-code",
+      complete: async () => await completion,
+      cancel: async () => controller.abort(),
+    };
+
+    if (launchBrowser && this.browserLauncher.mode !== "manual-url" && this.browserLauncher.mode !== "invalid") {
+      try {
+        await this.browserLauncher.open(new URL(authorizationUrl));
+      } catch (error) {
+        await session.cancel();
+        throw error;
+      }
+    }
+
+    return session;
+  }
+
   async refresh(
     refreshToken: string,
     securityContext: ContentTrakerRequestSecurityContext,
@@ -134,39 +296,98 @@ export class ContentTrakerOAuthClient {
   }
 }
 
-class FetchOAuthTransport implements OAuthTransport {
+export class FetchOAuthTransport implements OAuthTransport {
   async exchangeToken(tokenEndpoint: URL, parameters: URLSearchParams): Promise<OAuthTokenResponse> {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15_000);
-    timeout.unref();
-    try {
-      const response = await fetch(tokenEndpoint, {
-        method: "POST",
-        headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
-        body: parameters,
-        redirect: "error",
-        signal: controller.signal,
-      });
-      if (!response.ok) {
-        throw new Error(`ContentTraker OAuth token endpoint returned HTTP ${response.status}.`);
-      }
-
-      const json = await readBoundedJson(response, 65_536);
-      if (typeof json.access_token !== "string" || typeof json.refresh_token !== "string") {
-        throw new Error("ContentTraker OAuth token response did not contain the required credentials.");
-      }
-
-      return Object.freeze({
-        accessToken: json.access_token,
-        refreshToken: json.refresh_token,
-        expiresInSeconds: typeof json.expires_in === "number" ? json.expires_in : 0,
-        scope: typeof json.scope === "string" ? json.scope : "",
-        resource: typeof json.resource === "string" ? json.resource : "",
-      });
-    } finally {
-      clearTimeout(timeout);
+    const { response, json } = await postFormJson(tokenEndpoint, parameters);
+    if (!response.ok) {
+      throw new Error(`ContentTraker OAuth token endpoint returned HTTP ${response.status}.`);
     }
+    return tokenResponseFromJson(json);
   }
+
+  async beginDeviceAuthorization(
+    deviceAuthorizationEndpoint: URL,
+    parameters: URLSearchParams,
+    signal?: AbortSignal,
+  ): Promise<OAuthDeviceAuthorizationResponse> {
+    const { response, json } = await postFormJson(deviceAuthorizationEndpoint, parameters, signal);
+    if (!response.ok) throw new Error("ContentTraker OAuth device authorization endpoint rejected the request.");
+    const deviceCode = boundedString(json.device_code, "device code", 4_096);
+    const userCode = boundedString(json.user_code, "user code", 128);
+    const verificationUri = userFacingHttpsUrl(json.verification_uri, "verification URI");
+    const verificationUriComplete = json.verification_uri_complete === undefined
+      ? undefined
+      : userFacingHttpsUrl(json.verification_uri_complete, "complete verification URI");
+    const expiresInSeconds = validatePositiveNumber(json.expires_in, "device authorization expiry");
+    const intervalSeconds = json.interval === undefined
+      ? DEFAULT_DEVICE_POLL_INTERVAL_SECONDS
+      : validatePositiveNumber(json.interval, "device polling interval");
+    if (intervalSeconds > MAXIMUM_DEVICE_POLL_INTERVAL_SECONDS) {
+      throw new Error("ContentTraker OAuth device polling interval exceeds the supported bound.");
+    }
+    return Object.freeze({
+      deviceCode,
+      userCode,
+      verificationUri,
+      verificationUriComplete,
+      expiresInSeconds,
+      intervalSeconds,
+    });
+  }
+
+  async pollDeviceToken(
+    tokenEndpoint: URL,
+    parameters: URLSearchParams,
+    signal?: AbortSignal,
+  ): Promise<OAuthDeviceTokenPollResult> {
+    const { response, json } = await postFormJson(tokenEndpoint, parameters, signal);
+    if (response.ok) return { status: "authorized", token: tokenResponseFromJson(json) };
+    const code = typeof json.error === "string" ? json.error : "";
+    if (code === "authorization_pending") return { status: "pending" };
+    if (code === "slow_down") return { status: "slow-down" };
+    if (code === "access_denied") return { status: "denied" };
+    if (code === "expired_token") return { status: "expired" };
+    throw new Error("ContentTraker OAuth device token endpoint rejected the request.");
+  }
+}
+
+async function postFormJson(
+  endpoint: URL,
+  parameters: URLSearchParams,
+  signal?: AbortSignal,
+): Promise<{ response: Response; json: Record<string, unknown> }> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15_000);
+  timeout.unref();
+  const abort = () => controller.abort();
+  signal?.addEventListener("abort", abort, { once: true });
+  if (signal?.aborted) abort();
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
+      body: parameters,
+      redirect: "error",
+      signal: controller.signal,
+    });
+    return { response, json: await readBoundedJson(response, 65_536) };
+  } finally {
+    clearTimeout(timeout);
+    signal?.removeEventListener("abort", abort);
+  }
+}
+
+function tokenResponseFromJson(json: Record<string, unknown>): OAuthTokenResponse {
+  if (typeof json.access_token !== "string" || typeof json.refresh_token !== "string") {
+    throw new Error("ContentTraker OAuth token response did not contain the required credentials.");
+  }
+  return Object.freeze({
+    accessToken: json.access_token,
+    refreshToken: json.refresh_token,
+    expiresInSeconds: typeof json.expires_in === "number" ? json.expires_in : 0,
+    scope: typeof json.scope === "string" ? json.scope : "",
+    resource: typeof json.resource === "string" ? json.resource : "",
+  });
 }
 
 async function readBoundedJson(response: Response, maximumBytes: number): Promise<Record<string, unknown>> {
@@ -293,4 +514,71 @@ function validateTokenResponse(response: OAuthTokenResponse, expectedResource: s
     throw new Error("ContentTraker OAuth token response did not grant every required scope.");
   }
   return response;
+}
+
+function resolveDelegatedFlow(
+  env: NodeJS.ProcessEnv,
+  browserMode: BrowserInteractionMode,
+  metadata: ResolvedOAuthMetadata,
+): DelegatedFlow {
+  const requested = env.CONTENTTRAKER_DELEGATED_FLOW?.trim().toLowerCase() || "auto";
+  if (!["auto", "authorization-code", "device-code"].includes(requested)) {
+    throw new Error("CONTENTTRAKER_DELEGATED_FLOW must be auto, authorization-code, or device-code.");
+  }
+  if (browserMode === "invalid") {
+    throw new Error("ContentTraker browser interaction configuration is invalid.");
+  }
+  if (requested === "device-code") {
+    if (!metadata.deviceAuthorizationAvailable || !metadata.deviceAuthorizationEndpoint) {
+      throw new Error("ContentTraker OAuth metadata does not advertise device authorization.");
+    }
+    return "device-code";
+  }
+  if (requested === "authorization-code") return "authorization-code";
+  return browserMode === "manual-url" && metadata.deviceAuthorizationAvailable
+    ? "device-code"
+    : "authorization-code";
+}
+
+function boundedString(value: unknown, label: string, maximumLength: number): string {
+  if (typeof value !== "string" || value.length === 0 || value.length > maximumLength) {
+    throw new Error(`ContentTraker OAuth ${label} is invalid.`);
+  }
+  return value;
+}
+
+function userFacingHttpsUrl(value: unknown, label: string): string {
+  const raw = boundedString(value, label, 2_048);
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error(`ContentTraker OAuth ${label} is invalid.`);
+  }
+  if (url.protocol !== "https:" || url.username || url.password || url.hash) {
+    throw new Error(`ContentTraker OAuth ${label} must be a credential-free HTTPS URL.`);
+  }
+  return url.toString();
+}
+
+function validatePositiveNumber(value: unknown, label: string): number {
+  if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
+    throw new Error(`ContentTraker OAuth ${label} is invalid.`);
+  }
+  return value;
+}
+
+function abortableDelay(milliseconds: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.reject(new Error("ContentTraker OAuth authorization was cancelled."));
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      signal.removeEventListener("abort", abort);
+      resolve();
+    }, milliseconds);
+    const abort = () => {
+      clearTimeout(timeout);
+      reject(new Error("ContentTraker OAuth authorization was cancelled."));
+    };
+    signal.addEventListener("abort", abort, { once: true });
+  });
 }

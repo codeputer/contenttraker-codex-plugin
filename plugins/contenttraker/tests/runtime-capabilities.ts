@@ -142,6 +142,7 @@ const autoDesktopResult = inspectRuntimeCapabilities(
 assert.equal(autoDesktopResult.status, "ready");
 assert.equal(autoDesktopResult.requestedAuthenticationMode, "auto");
 assert.equal(autoDesktopResult.selectedAuthenticationMode, "delegated");
+assert.equal(autoDesktopResult.requestedDelegatedFlow, "auto");
 
 const containerResult = inspectRuntimeCapabilities(
   { CONTENTTRAKER_ENVIRONMENT: "staging" },
@@ -231,6 +232,13 @@ const invalidAuthMode = inspectRuntimeCapabilities(
 );
 assert.equal(invalidAuthMode.status, "invalid");
 assert.equal(invalidAuthMode.selectedStrategy.authentication, "invalid");
+
+const invalidDelegatedFlow = inspectRuntimeCapabilities(
+  delegatedEnv({ CONTENTTRAKER_DELEGATED_FLOW: "password" }),
+  linuxDesktop,
+);
+assert.equal(invalidDelegatedFlow.status, "invalid");
+assert.match(invalidDelegatedFlow.diagnostics.join(" "), /CONTENTTRAKER_DELEGATED_FLOW/);
 
 console.log("ContentTraker runtime capability tests passed.");
 

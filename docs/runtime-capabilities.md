@@ -5,6 +5,7 @@ The ContentTraker target environment and the plugin host runtime are independent
 - `CONTENTTRAKER_ENVIRONMENT` selects `staging` or `production`.
 - `CONTENTTRAKER_RUNTIME_PROFILE` selects how the local adapter evaluates host interaction and credential capabilities.
 - `CONTENTTRAKER_AUTH_MODE` selects `auto`, `delegated`, or `workload` and defaults to `auto`.
+- `CONTENTTRAKER_DELEGATED_FLOW` selects `auto`, `authorization-code`, or `device-code` and defaults to `auto`.
 - `CONTENTTRAKER_CREDENTIAL_STORE` selects `auto`, `windows-credential-manager`, `macos-keychain`, `linux-secret-service`, or `memory`.
 - `CONTENTTRAKER_CREDENTIAL_PROFILE` selects the durable delegated-user profile and defaults to `default`.
 
@@ -53,14 +54,15 @@ The tool never returns access tokens, refresh tokens, browser state, cookies, ke
 5. Select an interactive desktop profile only when matching host and browser-launch capability evidence exists.
 6. Select the matching platform credential provider only when its prerequisites are present.
 7. With authentication `auto`, select workload OAuth for container or CI evidence and delegated OAuth otherwise.
-8. Apply an explicit `delegated` or `workload` override without manufacturing missing capabilities.
-9. Return `blocked` or `invalid` rather than silently choosing a weaker authentication or credential-storage strategy.
+8. In delegated `auto`, use device authorization only when interaction is manual/headless and live metadata advertises the device endpoint and grant; otherwise retain authorization code + PKCE.
+9. Apply explicit authentication and delegated-flow overrides without manufacturing missing capabilities.
+10. Return `blocked` or `invalid` rather than silently choosing a weaker authentication or credential-storage strategy.
 
 Operating-system identity alone is not sufficient evidence of interactivity. Non-WSL Linux desktop selection requires a graphical-session signal and `xdg-open`; container and CI signals suppress automatic desktop selection. Inside WSL, the plugin launches a known Linux browser executable directly when one is available. It never routes WSL authorization through `xdg-open`; when no native browser is found it selects the manual URL provider. Windows browser interoperability remains disabled.
 
 ## Current provider coverage
 
-The current branch implements delegated authorization code + PKCE with system-browser, WSL-native, and manual URL interaction providers. Persistent refresh credentials use Windows Credential Manager, macOS Keychain, or Linux Secret Service. They are stored as binding-validated profiles independent of MCP connection/session IDs and can be rediscovered and refreshed by a new task. Explicit `memory` mode is available for ephemeral hosts; production additionally requires `CONTENTTRAKER_ALLOW_EPHEMERAL_PRODUCTION=true`.
+The current branch implements delegated authorization code + PKCE with system-browser, WSL-native, and manual URL interaction providers, plus RFC 8628 device authorization gated by live metadata. Persistent refresh credentials use Windows Credential Manager, macOS Keychain, or Linux Secret Service. They are stored as binding-validated profiles independent of MCP connection/session IDs and can be rediscovered and refreshed by a new task. Explicit `memory` mode is available for ephemeral hosts; production additionally requires `CONTENTTRAKER_ALLOW_EPHEMERAL_PRODUCTION=true`.
 
 Automatic delegated credential persistence is disabled in containers and CI. An intentionally interactive ephemeral container may explicitly select `CONTENTTRAKER_AUTH_MODE=delegated` and `CONTENTTRAKER_CREDENTIAL_STORE=memory`; it must authorize again after restart. Automatic container/CI selection uses workload OAuth and currently reports blocked because ContentTraker exposes no supported workload grant and the plugin has no host workload provider.
 

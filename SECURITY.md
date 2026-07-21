@@ -25,3 +25,5 @@ Windows passes credential data to a static native-API PowerShell bridge over std
 The plugin deliberately fails closed when the secure browser or keyring prerequisites are unavailable.
 
 OAuth interaction also fails closed until live metadata proves the configured resource/issuer relationship, same-authority HTTPS endpoints, code and refresh grants, public-client token authentication, PKCE `S256`, bearer-header support, and every requested scope. Metadata is cached only in process memory for a bounded interval. Redirects from metadata endpoints are rejected.
+
+Device authorization is used only when metadata advertises both its endpoint and grant. The user code and credential-free HTTPS verification URL may be displayed; the opaque device code, token responses, and polling error bodies never leave the adapter. Polling is bounded, cancellable, and follows RFC 8628 pending and slow-down behavior.

@@ -25,4 +25,4 @@ Run the optional, non-secret live verification from `plugins/contenttraker`:
 CONTENTTRAKER_TEST_LIVE_OAUTH_METADATA=1 npm run oauth-metadata
 ```
 
-Adding device or workload OAuth requires authorization-server implementation and published metadata. Once advertised, the diagnostic reports the server capability; a corresponding plugin interaction or host workload provider must still be implemented and tested before that host profile is supported.
+The device interaction provider is implemented and activates only after the server publishes the endpoint and grant. Workload OAuth still requires both authorization-server implementation and a corresponding host workload provider.

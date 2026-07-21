@@ -69,6 +69,8 @@ export function inspectRuntimeCapabilities(
 
   const requestedAuthMode = env.CONTENTTRAKER_AUTH_MODE?.trim().toLowerCase() || "auto";
   const validAuthMode = ["auto", "delegated", "workload"].includes(requestedAuthMode);
+  const requestedDelegatedFlow = env.CONTENTTRAKER_DELEGATED_FLOW?.trim().toLowerCase() || "auto";
+  const validDelegatedFlow = ["auto", "authorization-code", "device-code"].includes(requestedDelegatedFlow);
   const selectedAuthMode = validAuthMode
     ? requestedAuthMode === "auto"
       ? selectAuthenticationMode(selectedProfile, host)
@@ -77,6 +79,10 @@ export function inspectRuntimeCapabilities(
   const delegatedInteractionReady = host.browserInteractionMode !== "invalid";
   const delegatedReady = delegatedInteractionReady
     && host.credentialStoreAvailable;
+
+  if (!validDelegatedFlow) {
+    diagnostics.push("CONTENTTRAKER_DELEGATED_FLOW must be auto, authorization-code, or device-code.");
+  }
 
   const interaction: RuntimeCapability[] = [
     capability(
@@ -115,7 +121,7 @@ export function inspectRuntimeCapabilities(
     capability(
       "device-authorization",
       "external",
-      "Requires ContentTraker authorization-server metadata and a device authorization provider.",
+      "The plugin provider is implemented; availability requires live ContentTraker metadata to advertise both the device endpoint and device-code grant.",
     ),
     capability(
       "workload-identity",
@@ -211,6 +217,7 @@ export function inspectRuntimeCapabilities(
     || !environmentProfile.status.valid
     || !validCredentialProfile
     || !validAuthMode
+    || !validDelegatedFlow
     || diagnostics.some((entry) => entry.startsWith("Explicit runtime profile"));
   const ready = !invalid && selectedAuthMode === "delegated" && delegatedReady;
 
@@ -225,6 +232,7 @@ export function inspectRuntimeCapabilities(
     selectedProfile,
     requestedAuthenticationMode: requestedAuthMode,
     selectedAuthenticationMode: selectedAuthMode,
+    requestedDelegatedFlow,
     host,
     selectedStrategy,
     capabilities: {

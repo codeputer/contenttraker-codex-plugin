@@ -66,6 +66,7 @@ export interface RuntimeCapabilitiesResult {
   selectedProfile?: SelectedRuntimeProfileName;
   requestedAuthenticationMode: string;
   selectedAuthenticationMode?: "delegated" | "workload";
+  requestedDelegatedFlow: string;
   host: RuntimeHostFacts;
   selectedStrategy: RuntimeStrategySelection;
   capabilities: {
@@ -88,9 +89,12 @@ export type AuthorizationFlowStatus =
 
 export interface AuthorizationFlowResult {
   status: AuthorizationFlowStatus;
-  interaction?: "system-browser" | "manual-url" | "wsl-native";
+  interaction?: "system-browser" | "manual-url" | "wsl-native" | "device-code";
   authorizationUrl?: string;
   redirectUri?: string;
+  verificationUri?: string;
+  userCode?: string;
+  intervalSeconds?: number;
   expiresAt?: string;
   diagnostics: string[];
 }

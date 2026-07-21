@@ -110,7 +110,7 @@ server.registerTool(
   {
     title: "Begin ContentTraker Authorization",
     description:
-      "Start or reuse a connection-scoped delegated OAuth authorization flow and return its one-time authorization URL without returning credentials.",
+      "Start or reuse a delegated OAuth authorization-code or device-code interaction and return only its user-facing instructions.",
     inputSchema: {},
     annotations: {
       readOnlyHint: true,
@@ -135,7 +135,7 @@ server.registerTool(
     description:
       "Report the connection-scoped delegated OAuth flow status without returning credentials or calling a ContentTraker business API.",
     inputSchema: {
-      waitSeconds: z.number().int().min(0).max(15).optional().describe("Optional bounded wait for callback completion."),
+      waitSeconds: z.number().int().min(0).max(15).optional().describe("Optional bounded wait for callback or device authorization completion."),
     },
     annotations: {
       readOnlyHint: true,
@@ -161,7 +161,7 @@ server.registerTool(
   {
     title: "Cancel ContentTraker Authorization",
     description:
-      "Cancel the pending connection-scoped OAuth callback listener without revoking an already-issued server credential.",
+      "Cancel a pending OAuth callback or device polling interaction without revoking an already-issued server credential.",
     inputSchema: {},
     annotations: {
       readOnlyHint: false,

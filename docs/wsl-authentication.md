@@ -27,6 +27,8 @@ Merely having a D-Bus session is not enough; an actual Secret Service provider m
 
 Run `inspect_runtime_capabilities` before starting interactive authorization. Inside WSL, `CONTENTTRAKER_BROWSER_MODE=auto` launches a known Linux browser directly when a display and executable are available; otherwise it selects `manual-url`. The adapter never invokes `xdg-open` in WSL, and `CONTENTTRAKER_BROWSER_MODE=system` is rejected there so Windows browser interoperability cannot be selected accidentally.
 
+`CONTENTTRAKER_DELEGATED_FLOW=auto` uses device authorization instead of the manual loopback flow when the live authorization-server metadata advertises it. The tool then returns a `verificationUri` and `userCode`; it never returns the opaque device code.
+
 For manual interaction:
 
 1. Call `begin_contenttraker_authorization`.
@@ -42,7 +44,7 @@ The default credential profile is `default`. Set `CONTENTTRAKER_CREDENTIAL_PROFI
 
 If URL launch, loopback callback, native keyring loading, keyring access, token validation, `GET /me`, or host identity matching fails, the plugin stops at that layer. Do not work around the failure with a copied token, a committed credential, a desktop connector session, or a plaintext token cache.
 
-The current ContentTraker OAuth metadata advertises authorization-code and refresh-token grants. It does not advertise a device endpoint or OAuth device-code grant. A host that cannot open the displayed URL and route the callback to its loopback listener remains blocked until the authorization server provides device authorization or another supported flow.
+The current ContentTraker OAuth metadata advertises authorization-code and refresh-token grants. It does not advertise a device endpoint or OAuth device-code grant. The plugin-side provider is ready, but a host that cannot open the displayed URL and route the callback to its loopback listener remains blocked until the authorization server publishes device authorization or another supported flow.
 
 ## Host identity check
 

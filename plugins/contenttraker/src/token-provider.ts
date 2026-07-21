@@ -795,6 +795,9 @@ function authorizationFlowResult(flow: DelegatedAuthorizationFlow): Authorizatio
       ? {
           authorizationUrl: flow.session.authorizationUrl,
           redirectUri: flow.session.redirectUri,
+          verificationUri: flow.session.verificationUri,
+          userCode: flow.session.userCode,
+          intervalSeconds: flow.session.intervalSeconds,
           expiresAt: flow.session.expiresAt,
         }
       : {}),
@@ -813,8 +816,20 @@ function authorizationFailure(error: unknown): {
       diagnostic: "ContentTraker authorization expired before the loopback callback completed.",
     };
   }
+  if (message.includes("device authorization expired")) {
+    return {
+      status: "expired",
+      diagnostic: "ContentTraker device authorization expired before approval completed.",
+    };
+  }
   if (message.includes("cancelled")) {
     return { status: "cancelled", diagnostic: "ContentTraker authorization was cancelled locally." };
+  }
+  if (message.includes("device authorization was denied")) {
+    return { status: "failed", diagnostic: "ContentTraker device authorization was denied by the user or authorization server." };
+  }
+  if (message.includes("does not advertise device authorization")) {
+    return { status: "failed", diagnostic: "The ContentTraker authorization server does not advertise device authorization." };
   }
   if (message.includes("token endpoint")) {
     return { status: "failed", diagnostic: "ContentTraker authorization-code exchange failed at the token endpoint." };
