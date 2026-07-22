@@ -88,7 +88,7 @@ export function resolveContextFromRegistry(
       environment: registry.environment,
       workspaceName: match.workspaceName,
       workspaceId: match.workspaceId,
-      projectName: match.contentTrakerProjectName ?? match.projectName,
+      projectName: match.contentTrakerProjectName,
       projectId: match.contentTrakerProjectId,
       source: "registry-project",
     };
@@ -153,7 +153,7 @@ export function upsertRegistryMapping(
     environmentDocument.defaults = {
       workspaceName: input.workspaceName,
       workspaceId: input.workspaceId,
-      projectName: input.contentTrakerProjectName ?? input.projectName,
+      projectName: input.contentTrakerProjectName,
       projectId: input.contentTrakerProjectId,
     };
   }
@@ -178,7 +178,7 @@ export function upsertRegistryMapping(
       environment,
       workspaceName: nextMapping.workspaceName,
       workspaceId: nextMapping.workspaceId,
-      projectName: nextMapping.contentTrakerProjectName ?? nextMapping.projectName,
+      projectName: nextMapping.contentTrakerProjectName,
       projectId: nextMapping.contentTrakerProjectId,
       source: "registry-project",
     },

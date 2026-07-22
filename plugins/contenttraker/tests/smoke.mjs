@@ -231,6 +231,7 @@ try {
   const stagingRegistryPath = path.join(tempRoot, "staging-registry.json");
   const productionRegistryPath = path.join(tempRoot, "production-registry.json");
   const upsertRegistryPath = path.join(tempRoot, "upsert-registry.json");
+  const workspaceOnlyRegistryPath = path.join(tempRoot, "workspace-only-registry.json");
 
   fs.writeFileSync(
     stagingRegistryPath,
@@ -621,6 +622,49 @@ try {
   const upsertedDocument = JSON.parse(fs.readFileSync(upsertRegistryPath, "utf8"));
   assert.equal(upsertedDocument.version, 2);
   assert.equal(upsertedDocument.environments.staging.projects.length, 1);
+
+  const workspaceOnlyUpsert = await callTool({
+    name: "upsert_contenttraker_registry_mapping",
+    env: {
+      CONTENTTRAKER_CODEX_REGISTRY: workspaceOnlyRegistryPath,
+    },
+    arguments: {
+      environment: "staging",
+      projectName: "local-project-only",
+      repositoryRoot,
+      workspaceName: "ContentTraker Staging",
+      workspaceId: "workspace-staging",
+      setDefault: true,
+    },
+  });
+
+  assert.equal(workspaceOnlyUpsert.status, "created");
+  assert.equal(workspaceOnlyUpsert.selectedContext.projectName, undefined);
+  assert.equal(workspaceOnlyUpsert.selectedContext.projectId, undefined);
+
+  const workspaceOnlyDocument = JSON.parse(fs.readFileSync(workspaceOnlyRegistryPath, "utf8"));
+  assert.equal(workspaceOnlyDocument.environments.staging.projects[0].projectName, "local-project-only");
+  assert.equal(workspaceOnlyDocument.environments.staging.defaults.projectName, undefined);
+
+  const workspaceOnlyReadiness = await callTool({
+    name: "probe_contenttraker_api_readiness",
+    env: {
+      CONTENTTRAKER_CODEX_REGISTRY: workspaceOnlyRegistryPath,
+      CONTENTTRAKER_ENVIRONMENT: "staging",
+      CONTENTTRAKER_API_BASE_URL: apiBaseUrl,
+    },
+    arguments: {
+      projectName: "local-project-only",
+      repositoryRoot,
+    },
+  });
+
+  assert.equal(workspaceOnlyReadiness.status, "ready");
+  assert.equal(workspaceOnlyReadiness.selectedContext.projectName, undefined);
+  assert.equal(workspaceOnlyReadiness.checks.length, 3);
+  const workspaceOnlyProjectsCheck = workspaceOnlyReadiness.checks.find((check) => check.name === "workspace-projects");
+  assert.equal(workspaceOnlyProjectsCheck.status, "ok");
+  assert.equal(workspaceOnlyProjectsCheck.matched, undefined);
 
   const productionWithoutScopedConfig = await callTool({
     name: "resolve_contenttraker_context",
