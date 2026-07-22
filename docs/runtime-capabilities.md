@@ -7,7 +7,7 @@ The ContentTraker target environment and the plugin host runtime are independent
 - `CONTENTTRAKER_AUTH_MODE` selects `auto`, `delegated`, or `workload` and defaults to `auto`.
 - `CONTENTTRAKER_DELEGATED_FLOW` selects `auto`, `authorization-code`, or `device-code` and defaults to `auto`.
 - `CONTENTTRAKER_CREDENTIAL_STORE` selects `auto`, `windows-credential-manager`, `macos-keychain`, `linux-secret-service`, or `memory`.
-- `CONTENTTRAKER_CREDENTIAL_PROFILE` selects the durable delegated-user profile and defaults to `default`.
+- `CONTENTTRAKER_CREDENTIAL_PROFILE` selects the durable delegated-user profile and defaults to `default`; the stable binding also includes normalized `CONTENTTRAKER_REQUIRED_USER_EMAIL`.
 
 The runtime profile defaults to `auto`. Valid values are:
 
@@ -62,8 +62,8 @@ Operating-system identity alone is not sufficient evidence of interactivity. Non
 
 ## Current provider coverage
 
-The current branch implements delegated authorization code + PKCE with system-browser, WSL-native, and manual URL interaction providers, plus RFC 8628 device authorization gated by live metadata. Persistent refresh credentials use Windows Credential Manager, macOS Keychain, or Linux Secret Service. They are stored as binding-validated profiles independent of MCP connection/session IDs and can be rediscovered and refreshed by a new task. Explicit `memory` mode is available for ephemeral hosts; production additionally requires `CONTENTTRAKER_ALLOW_EPHEMERAL_PRODUCTION=true`.
+The current branch implements delegated authorization code + PKCE with system-browser, WSL-native, and manual URL interaction providers, plus RFC 8628 device authorization gated by live metadata. Persistent refresh credentials use Windows Credential Manager, macOS Keychain, or Linux Secret Service. They are stored as required-email-bound profiles independent of MCP connection/session IDs and can be rediscovered and refreshed by a new task. Explicit `memory` mode is available for ephemeral hosts; production additionally requires `CONTENTTRAKER_ALLOW_EPHEMERAL_PRODUCTION=true`.
 
 Automatic delegated credential persistence is disabled in containers and CI. An intentionally interactive ephemeral container may explicitly select `CONTENTTRAKER_AUTH_MODE=delegated` and `CONTENTTRAKER_CREDENTIAL_STORE=memory`; it must authorize again after restart. Automatic container/CI selection uses workload OAuth and currently reports blocked because ContentTraker exposes no supported workload grant and the plugin has no host workload provider.
 
-Raw bearer-token and legacy `service` configuration are unsupported. `service` and unknown authentication modes return `invalid` with a migration diagnostic. Live metadata currently reports device authorization and workload OAuth as unavailable; both remain external capabilities.
+Raw bearer-token and legacy `service` configuration are unsupported. `service` and unknown authentication modes return `invalid` with a migration diagnostic. The dated 2026-07-21 staging evidence reports device authorization and workload OAuth as unavailable; re-run the metadata inspection when remote verification is authorized.

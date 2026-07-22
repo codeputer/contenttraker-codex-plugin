@@ -109,6 +109,30 @@ async function providerErrorsAreRedacted(): Promise<void> {
   );
 }
 
+async function linuxKeyringFailuresAreActionableAndRedacted(): Promise<void> {
+  const handle = createCredentialHandle("locked-keyring-test");
+  const locked = new LinuxSecretServiceCredentialStore("secret-tool", async () => ({
+    exitCode: 1,
+    stdout: "",
+    stderr: `The keyring is locked ${secret}`,
+  }));
+  await assert.rejects(
+    () => locked.get(handle),
+    (error: Error) => /keyring is locked.*unlock/iu.test(error.message) && !error.message.includes(secret),
+  );
+
+  const missingService = new LinuxSecretServiceCredentialStore("secret-tool", async () => ({
+    exitCode: 1,
+    stdout: "",
+    stderr: `org.freedesktop.secrets unavailable ${secret}`,
+  }));
+  await assert.rejects(
+    () => missingService.get(handle),
+    (error: Error) => /Secret Service or D-Bus user session is unavailable/iu.test(error.message)
+      && !error.message.includes(secret),
+  );
+}
+
 async function explicitMemoryStoreIsEphemeral(): Promise<void> {
   const store = createSecureCredentialStore({
     CONTENTTRAKER_CREDENTIAL_STORE: "memory",
@@ -146,6 +170,7 @@ class RecordingRunner {
 
 await providersKeepSecretsOutOfArguments();
 await providerErrorsAreRedacted();
+await linuxKeyringFailuresAreActionableAndRedacted();
 await explicitMemoryStoreIsEphemeral();
 await profileLockSerializesRotations();
 await optionalNativeRoundTrip();

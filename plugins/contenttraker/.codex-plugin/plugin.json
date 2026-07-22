@@ -1,6 +1,6 @@
 {
   "name": "contenttraker",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "Secure local Codex adapter for ContentTraker workspace and digital asset operations.",
   "author": {
     "name": "Richard Reukema",
@@ -18,7 +18,7 @@
     "longDescription": "Connects Codex to the documented ContentTraker API through capability-selected authentication and secure credential providers, verifies the effective caller, and provides workspace and digital asset tools.",
     "developerName": "PhxBiz",
     "category": "Productivity",
-    "capabilities": ["MCP", "OAuth PKCE", "Workspace Context", "Digital Assets"],
+    "capabilities": ["MCP", "OAuth PKCE", "OAuth Device Authorization", "Restart-safe OS Keyring", "Workspace Context", "Digital Assets"],
     "websiteURL": "https://contenttraker.com",
     "defaultPrompt": [
       "Report the authenticated ContentTraker user.",

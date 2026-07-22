@@ -1,6 +1,6 @@
 {
   "name": "contenttraker",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -15,9 +15,10 @@
     "credential-restoration": "tsc --noEmit -p tsconfig.tests.json && esbuild tests/credential-restoration.ts --bundle --platform=node --format=esm --target=node18 --outfile=node_modules/.cache/contenttraker-credential-restoration.mjs && node node_modules/.cache/contenttraker-credential-restoration.mjs",
     "oauth-metadata": "tsc --noEmit -p tsconfig.tests.json && esbuild tests/oauth-metadata.ts --bundle --platform=node --format=esm --target=node18 --outfile=node_modules/.cache/contenttraker-oauth-metadata.mjs && node node_modules/.cache/contenttraker-oauth-metadata.mjs",
     "device-authorization": "tsc --noEmit -p tsconfig.tests.json && esbuild tests/device-authorization.ts --bundle --platform=node --format=esm --target=node18 --outfile=node_modules/.cache/contenttraker-device-authorization.mjs && node node_modules/.cache/contenttraker-device-authorization.mjs",
+    "workspace-safety": "tsc --noEmit -p tsconfig.tests.json && esbuild tests/workspace-safety.ts --bundle --platform=node --format=esm --target=node18 --outfile=node_modules/.cache/contenttraker-workspace-safety.mjs && node node_modules/.cache/contenttraker-workspace-safety.mjs",
     "native-credential-store": "tsc --noEmit -p tsconfig.tests.json && esbuild tests/native-credential-store.ts --bundle --platform=node --format=esm --target=node18 --outfile=node_modules/.cache/contenttraker-native-credential-store.mjs && node node_modules/.cache/contenttraker-native-credential-store.mjs",
     "release-artifact": "node tests/release-artifact.mjs",
-    "test": "npm run smoke && npm run auth-concurrency && npm run runtime-capabilities && npm run authorization-interaction && npm run credential-store && npm run credential-restoration && npm run oauth-metadata && npm run device-authorization"
+    "test": "npm run smoke && npm run auth-concurrency && npm run runtime-capabilities && npm run authorization-interaction && npm run credential-store && npm run credential-restoration && npm run oauth-metadata && npm run device-authorization && npm run workspace-safety"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",

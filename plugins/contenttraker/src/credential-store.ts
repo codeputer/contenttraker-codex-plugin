@@ -5,7 +5,9 @@ import { open, stat, unlink } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-const KEYRING_SERVICE = "ContentTraker Codex Adapter";
+// v2 intentionally makes the connection/session-derived v0.1.2 entries unreachable.
+// They are never enumerated or read, which avoids exposing legacy refresh material.
+const KEYRING_SERVICE = "ContentTraker Codex Adapter v2";
 const CREDENTIAL_STORE_MODES = [
   "auto",
   "windows-credential-manager",
@@ -184,7 +186,7 @@ export class LinuxSecretServiceCredentialStore implements SecureCredentialStore 
     const result = await this.run("read", ["lookup", "service", KEYRING_SERVICE, "account", handle]);
     if (result.exitCode === 0) return result.stdout.trim() || undefined;
     if (!result.stderr.trim() || /not found|no such|no matching/iu.test(result.stderr)) return undefined;
-    throw credentialStoreError(this.provider, "read");
+    throw credentialStoreError(this.provider, "read", result.stderr);
   }
 
   async set(handle: string, secret: string): Promise<void> {
@@ -194,14 +196,14 @@ export class LinuxSecretServiceCredentialStore implements SecureCredentialStore 
       ["store", `--label=${KEYRING_SERVICE}`, "service", KEYRING_SERVICE, "account", handle],
       secret,
     );
-    if (result.exitCode !== 0) throw credentialStoreError(this.provider, "write");
+    if (result.exitCode !== 0) throw credentialStoreError(this.provider, "write", result.stderr);
   }
 
   async delete(handle: string): Promise<void> {
     assertCredentialHandle(handle);
     if (await this.get(handle) === undefined) return;
     const result = await this.run("delete", ["clear", "service", KEYRING_SERVICE, "account", handle]);
-    if (result.exitCode !== 0) throw credentialStoreError(this.provider, "delete");
+    if (result.exitCode !== 0) throw credentialStoreError(this.provider, "delete", result.stderr);
   }
 
   private async run(operation: string, args: string[], input?: string): Promise<CredentialCommandResult> {
@@ -443,8 +445,21 @@ function operationalProbe(
   };
 }
 
-function credentialStoreError(provider: CredentialStoreProvider, operation: string): Error {
-  return new Error(`ContentTraker ${provider} credential ${operation} failed.`);
+function credentialStoreError(provider: CredentialStoreProvider, operation: string, stderr = ""): Error {
+  const detail = stderr.toLowerCase();
+  if (provider === "linux-secret-service") {
+    if (/timed out/iu.test(detail)) {
+      return new Error(`ContentTraker Linux Secret Service credential ${operation} timed out; ensure the Secret Service is running and unlock the host user's keyring before retrying.`);
+    }
+    if (/locked|is locked|prompt dismissed|dismissed/iu.test(detail)) {
+      return new Error(`ContentTraker Linux Secret Service credential ${operation} failed because the keyring is locked; unlock the host user's keyring and retry.`);
+    }
+    if (/dbus|d-bus|secret service|org\.freedesktop\.secrets|cannot autolaunch|no such interface/iu.test(detail)) {
+      return new Error(`ContentTraker Linux Secret Service credential ${operation} failed because the Secret Service or D-Bus user session is unavailable; start both in this WSL user session and retry.`);
+    }
+    return new Error(`ContentTraker Linux Secret Service credential ${operation} failed; confirm secret-tool can access an unlocked Secret Service keyring in this WSL user session.`);
+  }
+  return new Error(`ContentTraker ${provider} credential ${operation} failed; confirm the OS keyring is available and unlocked.`);
 }
 
 function runCredentialCommand(command: string, args: string[], input?: string): Promise<CredentialCommandResult> {
@@ -452,12 +467,24 @@ function runCredentialCommand(command: string, args: string[], input?: string): 
     const child = spawn(command, args, { stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
     let stdout = "";
     let stderr = "";
+    let settled = false;
+    const finish = (action: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      action();
+    };
+    const timeout = setTimeout(() => {
+      child.kill();
+      finish(() => resolve({ exitCode: 124, stdout: "", stderr: "credential helper timed out" }));
+    }, 15_000);
+    timeout.unref();
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
     child.stdout.on("data", (chunk: string) => { stdout += chunk; });
     child.stderr.on("data", (chunk: string) => { stderr += chunk; });
-    child.once("error", () => reject(new Error("ContentTraker credential helper could not start.")));
-    child.once("close", (exitCode) => resolve({ exitCode: exitCode ?? 1, stdout, stderr }));
+    child.once("error", () => finish(() => reject(new Error("ContentTraker credential helper could not start."))));
+    child.once("close", (exitCode) => finish(() => resolve({ exitCode: exitCode ?? 1, stdout, stderr })));
     child.stdin.end(input ?? "");
   });
 }

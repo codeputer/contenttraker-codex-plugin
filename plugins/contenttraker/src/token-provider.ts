@@ -41,7 +41,12 @@ export interface ContentTrakerTokenProvider {
   getStatus(context?: ContentTrakerRequestSecurityContext): TokenStrategyStatus;
   getAuthorizationHeader(
     context: ContentTrakerRequestSecurityContext,
-    options?: { forceRefresh?: boolean; rejectedCredentialVersion?: string; signal?: AbortSignal },
+    options?: {
+      forceRefresh?: boolean;
+      rejectedCredentialVersion?: string;
+      signal?: AbortSignal;
+      allowInteractive?: boolean;
+    },
   ): Promise<ContentTrakerAuthorizationSnapshot>;
   beginAuthorization(context: ContentTrakerRequestSecurityContext): Promise<AuthorizationFlowResult>;
   getAuthorizationStatus(
@@ -78,16 +83,18 @@ interface CredentialBinding {
   authorityIssuer: string;
   audience: string;
   clientId: string;
+  requiredUserEmail?: string;
 }
 
 interface StoredDelegatedCredential {
-  version: 1;
+  version: 2;
   profile: string;
   environment: string;
   authorityIssuer: string;
   tokenIssuer: string;
   audience: string;
   clientId: string;
+  requiredUserEmail?: string;
   subjectId: string;
   refreshToken: string;
   revision: string;
@@ -168,14 +175,29 @@ export class DelegatedContentTrakerTokenProvider implements ContentTrakerTokenPr
 
   async getAuthorizationHeader(
     context: ContentTrakerRequestSecurityContext,
-    options: { forceRefresh?: boolean; rejectedCredentialVersion?: string; signal?: AbortSignal } = {},
+    options: {
+      forceRefresh?: boolean;
+      rejectedCredentialVersion?: string;
+      signal?: AbortSignal;
+      allowInteractive?: boolean;
+    } = {},
   ): Promise<ContentTrakerAuthorizationSnapshot> {
     this.assertContextMatchesProfile(context);
     const key = sessionKey(context);
     let credential = this.credentialsBySession.get(key);
 
     if (!credential) {
-      credential = await this.loginSingleFlight(context, options.signal);
+      if (options.allowInteractive === false) {
+        credential = await this.restoreSingleFlight(context);
+        if (!credential) {
+          throw new Error(
+            "authentication_required: call begin_contenttraker_login, then poll_contenttraker_login, before retrying this operation.",
+          );
+        }
+        this.credentialsBySession.set(key, credential);
+      } else {
+        credential = await this.loginSingleFlight(context, options.signal);
+      }
     } else if (
       (options.forceRefresh
         && (!options.rejectedCredentialVersion || options.rejectedCredentialVersion === credential.credentialVersion))
@@ -480,9 +502,19 @@ export class DelegatedContentTrakerTokenProvider implements ContentTrakerTokenPr
       return await this.oauthClient.refresh(stored.refreshToken, context);
     } catch (error) {
       const latestValue = await this.credentialStore.get(binding.handle);
-      if (!latestValue || latestValue === storedValue) throw error;
-      const latest = parseStoredCredential(latestValue, binding, stored.subjectId);
-      return await this.oauthClient.refresh(latest.refreshToken, context);
+      if (latestValue && latestValue !== storedValue) {
+        const latest = parseStoredCredential(latestValue, binding, stored.subjectId);
+        try {
+          return await this.oauthClient.refresh(latest.refreshToken, context);
+        } catch (latestError) {
+          if (!isRejectedRefreshCredential(latestError)) throw latestError;
+          await this.credentialStore.delete(binding.handle);
+          throw rejectedRefreshCredentialError();
+        }
+      }
+      if (!isRejectedRefreshCredential(error)) throw error;
+      await this.credentialStore.delete(binding.handle);
+      throw rejectedRefreshCredentialError();
     }
   }
 
@@ -517,13 +549,14 @@ export class DelegatedContentTrakerTokenProvider implements ContentTrakerTokenPr
       }
 
       const stored: StoredDelegatedCredential = {
-        version: 1,
+        version: 2,
         profile: binding.profile,
         environment: binding.environment,
         authorityIssuer: binding.authorityIssuer,
         tokenIssuer: claims.tokenIssuer,
         audience: binding.audience,
         clientId: binding.clientId,
+        requiredUserEmail: binding.requiredUserEmail,
         subjectId: claims.subjectId,
         refreshToken: response.refreshToken,
         revision: createHash("sha256").update(response.refreshToken).digest("hex"),
@@ -713,6 +746,7 @@ function resolveCredentialBinding(
     );
   }
   const profile = configuredProfile.toLowerCase();
+  const requiredUserEmail = env.CONTENTTRAKER_REQUIRED_USER_EMAIL?.trim().toLowerCase() || undefined;
 
   const environment = resolveAdapterEnvironment(env);
   if (!environment.oauthIssuer) {
@@ -720,11 +754,12 @@ function resolveCredentialBinding(
   }
 
   const bindingKey = [
-    "v1",
+    "v2",
     context.environment,
     environment.oauthIssuer,
     context.tokenAudience,
     CONTENTTRAKER_OAUTH_CLIENT_ID,
+    requiredUserEmail ?? "unbound-user",
     profile,
   ].join("|");
   return {
@@ -734,6 +769,7 @@ function resolveCredentialBinding(
     authorityIssuer: environment.oauthIssuer,
     audience: context.tokenAudience,
     clientId: CONTENTTRAKER_OAUTH_CLIENT_ID,
+    requiredUserEmail,
   };
 }
 
@@ -749,12 +785,13 @@ function parseStoredCredential(
     throw new Error("The stored ContentTraker credential record is malformed.");
   }
 
-  const bindingMatches = candidate.version === 1
+  const bindingMatches = candidate.version === 2
     && candidate.profile === binding.profile
     && candidate.environment === binding.environment
     && candidate.authorityIssuer === binding.authorityIssuer
     && candidate.audience === binding.audience
-    && candidate.clientId === binding.clientId;
+    && candidate.clientId === binding.clientId
+    && candidate.requiredUserEmail === binding.requiredUserEmail;
   const requiredValuesPresent = typeof candidate.tokenIssuer === "string" && candidate.tokenIssuer.length > 0
     && typeof candidate.subjectId === "string" && candidate.subjectId.length > 0
     && typeof candidate.refreshToken === "string" && candidate.refreshToken.length > 0
@@ -801,7 +838,9 @@ function authorizationFlowResult(flow: DelegatedAuthorizationFlow): Authorizatio
           expiresAt: flow.session.expiresAt,
         }
       : {}),
-    diagnostics: flow.diagnostic ? [flow.diagnostic] : [],
+    diagnostics: [flow.session.launchDiagnostic, flow.diagnostic].filter(
+      (value): value is string => Boolean(value),
+    ),
   };
 }
 
@@ -845,6 +884,9 @@ function authorizationFailure(error: unknown): {
 
 function credentialFailure(error: unknown): string {
   const message = error instanceof Error ? error.message.toLowerCase() : "";
+  if (message.includes("refresh credential was rejected")) {
+    return "The stored ContentTraker refresh credential was rejected and deleted; run begin_contenttraker_login to authenticate again.";
+  }
   if (message.includes("credential profile") && message.includes("different subject")) {
     return "The configured ContentTraker credential profile is already bound to a different subject.";
   }
@@ -858,6 +900,17 @@ function credentialFailure(error: unknown): string {
     return "ContentTraker credential restoration is unavailable through the selected secure provider.";
   }
   return "ContentTraker credential restoration failed before interactive authorization could begin.";
+}
+
+function isRejectedRefreshCredential(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : "";
+  return /OAuth token endpoint returned HTTP (400|401)\./u.test(message);
+}
+
+function rejectedRefreshCredentialError(): Error {
+  return new Error(
+    "The stored ContentTraker refresh credential was rejected and deleted; run begin_contenttraker_login to authenticate again.",
+  );
 }
 
 function interaction(

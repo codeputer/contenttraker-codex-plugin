@@ -167,6 +167,25 @@ async function successfulDeviceFlowUsesDelegatedCredentialStore(): Promise<void>
   assert.equal(stored.includes(deviceSecret), false);
 }
 
+async function browserLaunchFailureKeepsDevicePollingActive(): Promise<void> {
+  const failingLauncher: BrowserLauncher = {
+    mode: "system-browser",
+    open: async () => { throw new Error("simulated browser failure"); },
+  };
+  const client = new ContentTrakerOAuthClient(
+    issuer,
+    failingLauncher,
+    new SequenceTransport([{ status: "authorized", token: token() }]),
+    2_000,
+    metadataResolver(true),
+    { CONTENTTRAKER_DELEGATED_FLOW: "device-code" },
+    fastTiming,
+  );
+  const session = await client.beginAuthorization(security(), true);
+  assert.match(session.launchDiagnostic ?? "", /optional browser launch failed/i);
+  assert.equal((await session.complete()).resource, resource);
+}
+
 async function fetchTransportValidatesAndRedactsResponses(): Promise<void> {
   const transport = new FetchOAuthTransport();
   const originalFetch = globalThis.fetch;
@@ -378,6 +397,7 @@ await explicitAndAutomaticSelectionFailClosed();
 await deviceTerminalStatesAreBounded();
 await tokenBindingFailuresAreRejected();
 await successfulDeviceFlowUsesDelegatedCredentialStore();
+await browserLaunchFailureKeepsDevicePollingActive();
 await fetchTransportValidatesAndRedactsResponses();
 await optionalLiveStagingBlocker();
 

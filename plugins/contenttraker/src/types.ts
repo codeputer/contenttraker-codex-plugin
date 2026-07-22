@@ -102,6 +102,7 @@ export interface AuthorizationFlowResult {
 export type ContextResolutionStatus =
   | "resolved"
   | "defaulted"
+  | "workspace_conflict"
   | "unconfigured"
   | "unresolved";
 
@@ -178,11 +179,22 @@ export interface ContentTrakerContext {
   workspaceId?: string;
   projectName?: string;
   projectId?: string;
-  source: "registry-project" | "registry-default";
+  source: "explicit-workspace" | "registry-project" | "registry-default" | "workspace-conflict";
+  workspaceConflict?: {
+    explicit: WorkspaceCandidate;
+    registry: WorkspaceCandidate;
+  };
+}
+
+export interface WorkspaceCandidate {
+  workspaceName?: string;
+  workspaceId?: string;
+  source: "explicit-workspace" | "registry-project";
 }
 
 export interface ResolveContextInput {
   projectName?: string;
+  workspaceId?: string;
   workspaceName?: string;
   repositoryRoot?: string;
 }
@@ -510,6 +522,10 @@ export interface ApiReadinessResult {
 export interface ResolveContextResult {
   status: ContextResolutionStatus;
   selectedContext?: ContentTrakerContext;
+  workspaceCandidates?: {
+    explicit: WorkspaceCandidate;
+    registry: WorkspaceCandidate;
+  };
   registry: {
     path: string;
     exists: boolean;

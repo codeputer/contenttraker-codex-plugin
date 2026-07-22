@@ -100,7 +100,12 @@ export class EnvironmentContentTrakerApiClient implements ContentTrakerApiClient
         correlationId: response.correlationId,
       };
     } catch (error) {
-      return { status: "failed", environment: api.environment, diagnostics: [safeErrorMessage(error)] };
+      const diagnostic = safeErrorMessage(error);
+      return {
+        status: diagnostic.startsWith("authentication_required:") ? "authentication_required" : "failed",
+        environment: api.environment,
+        diagnostics: [diagnostic],
+      };
     }
   }
 
@@ -453,7 +458,7 @@ export class EnvironmentContentTrakerApiClient implements ContentTrakerApiClient
       userApprovalStatement: input.userApprovalStatement,
     };
     try {
-      const response = await this.sendAuthorized("PUT", api, path, securityContext, body);
+      const response = await this.sendAuthorized("PUT", api, path, securityContext, body, context);
       if (!response.ok) {
         return { status: "failed", api, selectedContext: context, httpStatus: response.statusCode, diagnostics: [`ContentTraker digital asset update failed with HTTP ${response.statusCode}.`] };
       }
@@ -568,7 +573,7 @@ export class EnvironmentContentTrakerApiClient implements ContentTrakerApiClient
     successStatus: "ready" | "staged" | "completed",
   ): Promise<DigitalAssetUploadResult> {
     try {
-      const response = await this.sendAuthorized(method, api, path, securityContext, body);
+      const response = await this.sendAuthorized(method, api, path, securityContext, body, context);
       if (!response.ok) {
         return {
           status: "failed",
@@ -634,7 +639,7 @@ export class EnvironmentContentTrakerApiClient implements ContentTrakerApiClient
     };
 
     try {
-      const response = await this.sendAuthorized("POST", api, path, securityContext, body);
+      const response = await this.sendAuthorized("POST", api, path, securityContext, body, context);
       if (!response.ok) {
         return {
           status: "failed",
@@ -684,7 +689,7 @@ export class EnvironmentContentTrakerApiClient implements ContentTrakerApiClient
     };
 
     try {
-      const response = await this.sendAuthorized("PUT", api, path, securityContext, body);
+      const response = await this.sendAuthorized("PUT", api, path, securityContext, body, context);
       if (!response.ok) {
         return {
           status: "failed",
@@ -759,12 +764,16 @@ export class EnvironmentContentTrakerApiClient implements ContentTrakerApiClient
     path: string,
     securityContext: ContentTrakerRequestSecurityContext,
     body?: unknown,
+    writeContext?: ContentTrakerContext,
   ): Promise<JsonResponse> {
     const send = async (options: { forceRefresh?: boolean; rejectedCredentialVersion?: string }): Promise<{
       response: JsonResponse;
       credentialVersion: string;
     }> => {
-      const credential = await this.tokenProvider.getAuthorizationHeader(securityContext, options);
+      const credential = await this.tokenProvider.getAuthorizationHeader(securityContext, {
+        ...options,
+        allowInteractive: false,
+      });
       if (credential.environment !== api.environment || credential.audience !== securityContext.tokenAudience) {
         throw new Error("ContentTraker credential does not match the request environment or audience.");
       }
@@ -779,6 +788,24 @@ export class EnvironmentContentTrakerApiClient implements ContentTrakerApiClient
           return { response: callerResponse, credentialVersion: credential.credentialVersion };
         }
         this.recordVerifiedCaller(api, securityContext, callerResponse);
+      }
+
+      if (method !== "GET") {
+        if (!writeContext?.workspaceId) {
+          throw new Error("ContentTraker write blocked because an explicit resolved workspaceId is required.");
+        }
+        const workspacesResponse = await this.serverApiClient.getJson(
+          api.baseUrl!, "/workspaces", credential.authorizationHeader, securityContext.correlationId,
+        );
+        if (workspacesResponse.statusCode === 401) {
+          return { response: workspacesResponse, credentialVersion: credential.credentialVersion };
+        }
+        if (!workspacesResponse.ok) {
+          throw new Error(`ContentTraker write blocked because authorized workspace verification returned HTTP ${workspacesResponse.statusCode}.`);
+        }
+        if (!itemListHasIdMatch(workspacesResponse.json, writeContext.workspaceId)) {
+          throw new Error("ContentTraker write blocked because the selected workspaceId is not authorized for the verified user.");
+        }
       }
 
       if (method === "GET") {
@@ -858,6 +885,9 @@ function validateReadInput(
   if (!api.environmentProfile.valid) diagnostics.push("ContentTraker environment is invalid.");
   if (!api.configured) diagnostics.push("ContentTraker API base URL is not configured; digital asset read is blocked.");
   if (!api.tokenStrategy.configured) diagnostics.push("ContentTraker bearer token is not configured; digital asset read is blocked.");
+  if (context?.source === "workspace-conflict") {
+    diagnostics.push("workspace_conflict: the explicit workspace differs from the exact repository/project registry mapping; no ContentTraker operation was attempted.");
+  }
   if (!context?.workspaceId) diagnostics.push("ContentTraker workspaceId is required.");
   return diagnostics;
 }
@@ -918,6 +948,10 @@ function validateCreateDigitalAssetInput(
     diagnostics.push("ContentTraker write policy does not expose digital asset writes for this environment.");
   }
 
+  if (context?.source === "workspace-conflict") {
+    diagnostics.push("workspace_conflict: the explicit workspace differs from the exact repository/project registry mapping; no ContentTraker write was attempted.");
+  }
+
   if (!context?.workspaceId) {
     diagnostics.push("ContentTraker workspaceId is required; projectId is optional provenance and is not required.");
   }
@@ -968,6 +1002,7 @@ function validateLifecycleWriteInput(
   if (!api.configured) diagnostics.push("ContentTraker API base URL is not configured; lifecycle write is blocked.");
   if (!api.tokenStrategy.configured) diagnostics.push("ContentTraker bearer token is not configured; lifecycle write is blocked.");
   if (!api.writePolicy.writesExposed) diagnostics.push("ContentTraker write policy does not expose lifecycle writes for this environment.");
+  if (context?.source === "workspace-conflict") diagnostics.push("workspace_conflict: the explicit workspace differs from the exact repository/project registry mapping; no ContentTraker write was attempted.");
   if (!context?.workspaceId) diagnostics.push("ContentTraker workspaceId is required.");
   if (!input.digitalAssetId?.trim()) diagnostics.push("digitalAssetId is required.");
   if (!["draft", "published", "archived"].includes(input.status)) diagnostics.push("status must be draft, published, or archived.");
@@ -1088,6 +1123,15 @@ function itemListHasMatch(value: unknown, id: string | undefined, name: string |
   return items.some((item) => itemMatches(item, id, name));
 }
 
+function itemListHasIdMatch(value: unknown, id: string): boolean {
+  const items = extractItems(value);
+  return Boolean(items?.some((item) => {
+    if (!isRecord(item)) return false;
+    const itemId = stringValue(item.id) ?? stringValue(item.workspaceId);
+    return equals(id, itemId);
+  }));
+}
+
 function itemMatches(value: unknown, id: string | undefined, name: string | undefined): boolean {
   if (!value || typeof value !== "object") {
     return false;
@@ -1127,7 +1171,7 @@ function safeErrorMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
   return message
     .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [REDACTED]")
-    .replace(/(access_token|refresh_token|authorization|cookie)\s*[:=]\s*[^\s,;]+/gi, "$1=[REDACTED]");
+    .replace(/(access_token|refresh_token|device_code|code_verifier|authorization_code|client_secret|authorization|cookie)\s*[:=]\s*[^\s,;]+/gi, "$1=[REDACTED]");
 }
 
 function assertHttpsAudienceBoundApi(baseUrl: string, audience: string): void {

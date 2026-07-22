@@ -74,8 +74,18 @@ export function resolveContextFromRegistry(
   input: ResolveContextInput,
   registry: RegistrySnapshot,
 ): ContentTrakerContext | undefined {
+  const explicit = input.workspaceId?.trim() || input.workspaceName?.trim()
+    ? {
+        environment: registry.environment,
+        workspaceId: input.workspaceId?.trim() || undefined,
+        workspaceName: input.workspaceName?.trim() || undefined,
+        source: "explicit-workspace" as const,
+      }
+    : undefined;
   if (!registry.loaded || !registry.document) {
-    return undefined;
+    const registryCouldHideAProjectConflict = registry.exists
+      && Boolean(input.projectName?.trim() || input.repositoryRoot?.trim());
+    return registryCouldHideAProjectConflict ? undefined : explicit;
   }
 
   const projects = Array.isArray(registry.environmentDocument?.projects)
@@ -84,15 +94,44 @@ export function resolveContextFromRegistry(
   const match = projects.find((project) => projectMatches(input, project));
 
   if (match) {
-    return {
+    const mapped = {
       environment: registry.environment,
       workspaceName: match.workspaceName,
       workspaceId: match.workspaceId,
       projectName: match.contentTrakerProjectName,
       projectId: match.contentTrakerProjectId,
-      source: "registry-project",
+      source: "registry-project" as const,
     };
+    if (explicit && workspaceCandidatesConflict(explicit, mapped)) {
+      return {
+        environment: registry.environment,
+        source: "workspace-conflict",
+        workspaceConflict: {
+          explicit: {
+            workspaceId: explicit.workspaceId,
+            workspaceName: explicit.workspaceName,
+            source: "explicit-workspace",
+          },
+          registry: {
+            workspaceId: mapped.workspaceId,
+            workspaceName: mapped.workspaceName,
+            source: "registry-project",
+          },
+        },
+      };
+    }
+    if (explicit) {
+      return {
+        ...mapped,
+        workspaceId: explicit.workspaceId ?? mapped.workspaceId,
+        workspaceName: explicit.workspaceName ?? mapped.workspaceName,
+        source: "explicit-workspace",
+      };
+    }
+    return mapped;
   }
+
+  if (explicit) return explicit;
 
   const defaults = registry.environmentDocument?.defaults;
   if (defaults?.workspaceName || defaults?.workspaceId || defaults?.projectName || defaults?.projectId) {
@@ -191,18 +230,29 @@ export function upsertRegistryMapping(
 }
 
 function projectMatches(input: ResolveContextInput, project: RegistryProjectMapping): boolean {
-  if (input.projectName && equals(input.projectName, project.projectName)) {
-    return true;
+  const projectNameMatches = input.projectName
+    ? equals(input.projectName, project.projectName)
+    : undefined;
+  const repositoryMatches = input.repositoryRoot
+    ? Boolean(project.repositoryRoot
+      && normalizePath(input.repositoryRoot) === normalizePath(project.repositoryRoot))
+    : undefined;
+  if (projectNameMatches !== undefined && repositoryMatches !== undefined) {
+    return projectNameMatches && repositoryMatches;
   }
+  return projectNameMatches ?? repositoryMatches ?? false;
+}
 
-  if (input.workspaceName && equals(input.workspaceName, project.workspaceName)) {
-    return true;
+function workspaceCandidatesConflict(
+  explicit: Pick<ContentTrakerContext, "workspaceId" | "workspaceName">,
+  mapped: Pick<ContentTrakerContext, "workspaceId" | "workspaceName">,
+): boolean {
+  if (explicit.workspaceId) {
+    return !mapped.workspaceId || !equals(explicit.workspaceId, mapped.workspaceId);
   }
-
-  if (input.repositoryRoot && project.repositoryRoot) {
-    return normalizePath(input.repositoryRoot) === normalizePath(project.repositoryRoot);
+  if (explicit.workspaceName) {
+    return !mapped.workspaceName || !equals(explicit.workspaceName, mapped.workspaceName);
   }
-
   return false;
 }
 

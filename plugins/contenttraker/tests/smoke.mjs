@@ -768,7 +768,13 @@ async function callTool({ name, env, arguments: toolArguments }) {
     },
   ];
 
-  const result = await runServer(requests, env);
+  let result = await runServer(requests, env);
+  if (process.platform === "win32" && result.status === 3221226505 && result.stderr === "") {
+    // Node can occasionally terminate a rapidly spawned Windows test child with
+    // STATUS_STACK_BUFFER_OVERRUN before emitting adapter output. Retry once;
+    // a deterministic adapter crash still fails on the second attempt.
+    result = await runServer(requests, env);
+  }
 
   assert.equal(result.status, 0, result.stderr || `Process exited with signal ${result.signal ?? "unknown"}`);
   assert.equal(result.stderr, "");
@@ -792,9 +798,13 @@ async function callTool({ name, env, arguments: toolArguments }) {
   assert.equal(tools.some((tool) => tool.name === "inspect_runtime_capabilities"), true);
   assert.equal(tools.some((tool) => tool.name === "inspect_contenttraker_oauth_metadata"), true);
   assert.equal(tools.some((tool) => tool.name === "begin_contenttraker_authorization"), true);
+  assert.equal(tools.some((tool) => tool.name === "begin_contenttraker_login"), true);
   assert.equal(tools.some((tool) => tool.name === "get_contenttraker_authorization_status"), true);
+  assert.equal(tools.some((tool) => tool.name === "poll_contenttraker_login"), true);
+  assert.equal(tools.some((tool) => tool.name === "get_contenttraker_auth_status"), true);
   assert.equal(tools.some((tool) => tool.name === "cancel_contenttraker_authorization"), true);
   assert.equal(tools.some((tool) => tool.name === "forget_contenttraker_credential"), true);
+  assert.equal(tools.some((tool) => tool.name === "logout_contenttraker"), true);
   assert.equal(tools.some((tool) => tool.name === "get_current_user"), true);
   assert.equal(tools.some((tool) => tool.name === "list_workspaces"), true);
   assert.equal(

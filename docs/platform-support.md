@@ -8,7 +8,7 @@ The plugin ships one bundled Node.js adapter. Target environment, host profile, 
 | macOS desktop | Delegated | `open` | macOS Keychain |
 | Linux desktop | Delegated | `xdg-open` with a display | Secret Service through `secret-tool` |
 | Isolated WSL | Delegated | Known WSLg Linux browser, device code when advertised, or manual loopback URL | Linux Secret Service, never Windows Credential Manager |
-| Headless Linux | Delegated | Device code when advertised, otherwise manual loopback URL | Linux Secret Service or explicit ephemeral memory |
+| Headless Linux | Delegated | Device code when advertised; otherwise blocked unless an external browser can reach the loopback callback | Linux Secret Service or explicit ephemeral memory |
 | Docker, Kubernetes, CI | Workload OAuth | None | Host workload identity; no user keyring or embedded credential |
 
 All hosts require Node.js 18 or newer and network access to the selected ContentTraker resource and OAuth authority.
@@ -21,7 +21,7 @@ Linux desktop requires a graphical session, `xdg-open`, `secret-tool`, a D-Bus u
 
 ## WSL and headless Linux
 
-WSL authorization never invokes `xdg-open` and never crosses into a Windows browser. With WSLg, the adapter launches only a known Linux browser executable. Without one, delegated-flow `auto` uses device code when live metadata advertises it; otherwise it returns the manual authorization URL and keeps the WSL loopback callback alive.
+WSL authorization never invokes `xdg-open` and never crosses into a Windows browser. With WSLg, the adapter launches only a known Linux browser executable. Without one, delegated-flow `auto` uses device code when live metadata advertises it; otherwise it returns a manual PKCE URL whose loopback callback must still be reachable. A clean headless host without that callback path is blocked at the broker-capability layer.
 
 Persistent restoration still requires `secret-tool`, an existing D-Bus user session, an operational Secret Service provider, and an unlocked keyring. A display or D-Bus address alone does not prove those capabilities. Explicit `CONTENTTRAKER_CREDENTIAL_STORE=memory` permits one-process delegated use but requires authorization again after restart.
 
@@ -42,7 +42,7 @@ That exception is ephemeral user authorization, not unattended workload identity
 
 1. `inspect_runtime_capabilities`
 2. `inspect_contenttraker_oauth_metadata`
-3. `begin_contenttraker_authorization` and `get_contenttraker_authorization_status` for delegated hosts
+3. `begin_contenttraker_login` and `poll_contenttraker_login` for delegated hosts
 4. `get_current_user`
 5. `list_workspaces`
 6. `resolve_contenttraker_context`

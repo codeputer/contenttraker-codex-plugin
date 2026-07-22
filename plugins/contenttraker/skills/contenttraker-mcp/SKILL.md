@@ -13,17 +13,17 @@ Authentication defaults to capability-selected `auto`: delegated OAuth for non-c
 
 Call `inspect_contenttraker_oauth_metadata` when diagnosing authorization-server, scope, PKCE, device-flow, workload-flow, or protected-resource readiness. Do not infer a device or workload endpoint. Treat it as available only when this live metadata tool reports it.
 
-If delegated authentication is needed, call `begin_contenttraker_authorization`. When it returns `pending`, present its authorization URL without rewriting it. For `device-code`, also present `userCode` and `verificationUri`; never request or expose the opaque device code. Then call `get_contenttraker_authorization_status` with a bounded `waitSeconds` value. Do not ask the user for an authorization code, token, verifier, cookie, or refresh credential. Use `cancel_contenttraker_authorization` only to cancel a pending local interaction. After `authorized`, call `get_current_user`; authorization status alone does not prove the effective ContentTraker identity.
+If delegated authentication is needed, call `begin_contenttraker_login`. When it returns `pending`, present its authorization URL without rewriting it. For `device-code`, also present `userCode` and `verificationUri`; never request or expose the opaque device code. Then call `poll_contenttraker_login` with a bounded `waitSeconds` value. Do not ask the user for an authorization code, token, verifier, cookie, or refresh credential. Use `cancel_contenttraker_authorization` only to cancel a pending local interaction. After `authorized`, call `get_current_user`; authorization status alone does not prove the effective ContentTraker identity. `authentication_required` means the explicit login sequence is required; business tools must not launch a browser.
 
-The adapter restores a persistent `CONTENTTRAKER_CREDENTIAL_PROFILE` automatically in a new task. Treat a profile/subject mismatch as an identity boundary and stop; do not switch profiles or delete credentials without user direction. `forget_contenttraker_credential` requires the literal confirmation `FORGET_CONTENTTRAKER_CREDENTIAL`, deletes only the selected local profile, and does not revoke server authorization.
+The adapter restores a persistent, required-email-bound `CONTENTTRAKER_CREDENTIAL_PROFILE` automatically in a new task. Treat a profile/subject mismatch as an identity boundary and stop; do not switch profiles or delete credentials without user direction. `logout_contenttraker` requires the literal confirmation `LOGOUT_CONTENTTRAKER`, deletes only the selected v2 local profile, and does not revoke server authorization.
 
 Before any write:
 
 1. Call `get_current_user` and stop if it fails or the configured host identity does not match.
 2. Call `list_workspaces` and confirm the intended authorized workspace.
-3. Resolve the workspace context. Project is optional provenance, not identity.
+3. Resolve the workspace context with explicit `workspaceId` or `workspaceName`. Stop on `workspace_conflict`; project is optional provenance, not identity.
 4. Obtain explicit user approval for the exact write.
 
 Create assets as drafts unless the user explicitly authorizes another supported lifecycle state. Use a stable idempotency key for create and lifecycle writes.
 
-Staging is the default environment. The browser login page is not the API endpoint. Interactive authentication uses ContentTraker authorization code with PKCE and the OS keyring inside the host boundary. In WSL, the adapter launches only a known Linux browser executable or returns a manual URL; it never uses `xdg-open` or Windows browser interoperability. If the browser/loopback path or OS keyring is unavailable, report that exact layer and stop; never use plaintext credential storage or a copied connector credential.
+Staging is the default environment. The browser login page is not the API endpoint. In WSL, the adapter prefers broker-advertised device authorization for headless interaction and never uses `xdg-open` or Windows browser interoperability. If device authorization is not advertised, or the OS keyring is unavailable or locked, report that exact layer and stop; never use plaintext credential storage or a copied connector credential.

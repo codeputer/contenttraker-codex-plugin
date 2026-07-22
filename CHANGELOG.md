@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 - 2026-07-21
 
 - Adds an independent host runtime capability model and unauthenticated `inspect_runtime_capabilities` tool for Windows, macOS, Linux, WSL, headless, container, and CI profile selection.
 - Reports current, blocked, future, and externally dependent authentication, interaction, credential-persistence, and cross-task restoration capabilities without exposing credentials.
@@ -14,7 +14,15 @@
 - Adds `inspect_contenttraker_oauth_metadata` plus a non-secret staging contract probe for `codex-mcp`, PKCE, requested scopes, and dynamic loopback redirects.
 - Defaults authentication selection by host capability, removes raw environment bearer-token authentication, and leaves container/CI workload OAuth fail closed until supported by both server metadata and a host provider.
 - Adds capability-gated OAuth device authorization with bounded RFC 8628 polling and the same secure credential-restoration path as PKCE.
+- Adds explicit `begin_contenttraker_login`, `poll_contenttraker_login`, `get_contenttraker_auth_status`, and `logout_contenttraker` tools while retaining the v0.1 authorization tool names for compatibility.
+- Makes business API tools non-interactive: `get_current_user` and later operations return `authentication_required` instead of launching a browser.
+- Keeps device polling active when the optional browser convenience fails, so headless authorization never depends on a launcher.
+- Binds persistent credential handles to the configured required user email and moves them to an identity-isolated v2 OS-keyring namespace; v0.1.2 connection/session-derived entries are never loaded or enumerated.
+- Enforces workspace precedence and `workspace_conflict` detection for explicit workspace ID/name versus exact repository/project mappings.
+- Rechecks `/me` and the exact workspace ID in `/workspaces` before every write; unauthorized or ambiguous destinations fail before the write request.
 - Adds Windows/macOS/Linux Node 18 and Linux-container release gates, native desktop keyring checks, a portable artifact verifier, and an evidence-based host verification matrix.
+
+Migration: restart Codex after upgrading, set the intended `CONTENTTRAKER_REQUIRED_USER_EMAIL`, and run the explicit login flow once. v0.1.2 keyring entries are logically invalidated by the v2 namespace and are not inspected or migrated because their handles contain per-session values. Remove old entries through the operating system's credential UI if local retention policy requires physical deletion.
 
 ## 0.1.2 - 2026-07-21
 
@@ -36,4 +44,4 @@
 - Uses ContentTraker OAuth authorization code with PKCE and OS-keyring refresh-token storage; no connector-session or plaintext credential fallback exists.
 - Documents installation, upgrade, removal, security, and WSL prerequisites.
 
-Known limitation: a host still needs a browser path that can return to its loopback listener and a supported secure credential provider. The ContentTraker OAuth service does not currently advertise device authorization, so hosts unable to satisfy the loopback flow fail closed.
+Known limitation for 0.1.x: a host needs a browser path that can return to its loopback listener and a supported secure credential provider. The client-side device provider first ships in 0.2.0; fully headless use also requires the ContentTraker authorization server to advertise and implement RFC 8628 device authorization.

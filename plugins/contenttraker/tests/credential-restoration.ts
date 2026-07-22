@@ -40,10 +40,13 @@ class RestorationOAuthClient {
 }
 
 await newTaskRestoresWithoutInteractiveAuthorization();
+await nonInteractiveApiAccessRequiresExplicitLogin();
 await corruptedBindingIsRejectedAndRemoved();
 await subjectChangesAreRejectedWithoutOverwritingProfile();
 await distinctProfilesRemainIsolated();
+await requiredIdentityIsPartOfTheStableBinding();
 await crossProcessRotationRecoveryUsesNewerStoredCredential();
+await rejectedRefreshCredentialIsDeleted();
 await invalidationRemovesTheDurableProfile();
 
 console.log("ContentTraker credential-restoration tests passed.");
@@ -68,6 +71,18 @@ async function newTaskRestoresWithoutInteractiveAuthorization(): Promise<void> {
   assert.equal(restored.subjectId, "durable-user");
   assert.equal(second.getStatus(secondContext).crossTaskRestoration, true);
   assert.equal(JSON.stringify(status).includes("refresh-durable-user"), false);
+}
+
+async function nonInteractiveApiAccessRequiresExplicitLogin(): Promise<void> {
+  const store = new PersistentMemoryCredentialStore();
+  const oauth = new RestorationOAuthClient("explicit-login-user");
+  const next = provider(store, oauth, "explicit-login-profile");
+  await assert.rejects(
+    () => next.getAuthorizationHeader(security("explicit-login", "explicit-login"), { allowInteractive: false }),
+    /authentication_required.*begin_contenttraker_login.*poll_contenttraker_login/,
+  );
+  assert.equal(oauth.authorizeCount, 0);
+  assert.equal(store.values.size, 0);
 }
 
 async function corruptedBindingIsRejectedAndRemoved(): Promise<void> {
@@ -115,6 +130,25 @@ async function distinctProfilesRemainIsolated(): Promise<void> {
   assert.equal(store.values.size, 2);
 }
 
+async function requiredIdentityIsPartOfTheStableBinding(): Promise<void> {
+  const store = new PersistentMemoryCredentialStore();
+  const first = provider(store, new RestorationOAuthClient("shared-subject"), "identity-profile", "operator@example.org");
+  const second = provider(store, new RestorationOAuthClient("shared-subject"), "identity-profile", "reviewer@example.org");
+  const sameIdentityDifferentCase = provider(
+    store,
+    new RestorationOAuthClient("shared-subject"),
+    "identity-profile",
+    "OPERATOR@EXAMPLE.ORG",
+  );
+  const credentialA = await first.getAuthorizationHeader(security("identity-a", "identity-a"));
+  const credentialB = await second.getAuthorizationHeader(security("identity-b", "identity-b"));
+  const restoredA = await sameIdentityDifferentCase.getAuthorizationHeader(security("identity-c", "identity-c"));
+  assert.notEqual(credentialA.credentialHandle, credentialB.credentialHandle);
+  assert.equal(credentialA.credentialHandle, restoredA.credentialHandle);
+  assert.equal(store.values.size, 2);
+  assert.equal([...store.values.values()].every((value) => !value.includes("connection-") && !value.includes("session-")), true);
+}
+
 async function crossProcessRotationRecoveryUsesNewerStoredCredential(): Promise<void> {
   const store = new PersistentMemoryCredentialStore();
   const first = provider(store, new RestorationOAuthClient("rotation-user"), "rotation-profile");
@@ -143,6 +177,24 @@ async function crossProcessRotationRecoveryUsesNewerStoredCredential(): Promise<
   assert.deepEqual(rotationOAuth.refreshTokens, [originalRefreshToken, externalRefreshToken]);
 }
 
+async function rejectedRefreshCredentialIsDeleted(): Promise<void> {
+  const store = new PersistentMemoryCredentialStore();
+  const first = provider(store, new RestorationOAuthClient("rejected-user"), "rejected-profile");
+  await first.getAuthorizationHeader(security("rejected-one", "rejected-one"));
+  assert.equal(store.values.size, 1);
+
+  const rejectedOAuth = new RestorationOAuthClient("rejected-user", async () => {
+    throw new Error("ContentTraker OAuth token endpoint returned HTTP 400.");
+  });
+  const next = provider(store, rejectedOAuth, "rejected-profile");
+  await assert.rejects(
+    () => next.getAuthorizationHeader(security("rejected-two", "rejected-two"), { allowInteractive: false }),
+    /refresh credential was rejected and deleted.*begin_contenttraker_login/i,
+  );
+  assert.equal(store.values.size, 0);
+  assert.equal(rejectedOAuth.authorizeCount, 0);
+}
+
 async function invalidationRemovesTheDurableProfile(): Promise<void> {
   const store = new PersistentMemoryCredentialStore();
   const context = security("revoke-one", "revoke-one");
@@ -162,15 +214,17 @@ function provider(
   store: SecureCredentialStore,
   oauth: RestorationOAuthClient,
   credentialProfile: string,
+  requiredUserEmail?: string,
 ): DelegatedContentTrakerTokenProvider {
-  return new DelegatedContentTrakerTokenProvider(store, oauth as never, environment(credentialProfile));
+  return new DelegatedContentTrakerTokenProvider(store, oauth as never, environment(credentialProfile, requiredUserEmail));
 }
 
-function environment(credentialProfile: string): NodeJS.ProcessEnv {
+function environment(credentialProfile: string, requiredUserEmail?: string): NodeJS.ProcessEnv {
   return {
     CONTENTTRAKER_AUTH_MODE: "delegated",
     CONTENTTRAKER_ENVIRONMENT: "staging",
     CONTENTTRAKER_CREDENTIAL_PROFILE: credentialProfile,
+    CONTENTTRAKER_REQUIRED_USER_EMAIL: requiredUserEmail,
     CONTENTTRAKER_TOKEN_ISSUER_SHA256: createHash("sha256").update("public-test-issuer").digest("hex"),
   };
 }

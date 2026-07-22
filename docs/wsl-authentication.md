@@ -2,7 +2,7 @@
 
 ## Supported contract
 
-Interactive sessions use ContentTraker OAuth authorization code with PKCE (`S256`) and public client ID `codex-mcp`. The adapter listens on a loopback callback, opens the authorization URL with a known Linux browser executable or displays the URL for manual opening, exchanges the one-time code inside the adapter process, validates token routing claims, and calls `GET /me` before any business operation.
+Interactive sessions use public client ID `codex-mcp` with OAuth device authorization when the broker advertises RFC 8628, otherwise authorization code with PKCE (`S256`). The adapter performs the token exchange inside WSL, validates token routing claims, and calls `GET /me` before any business operation. `get_current_user` never launches a browser; login starts only through the explicit login tool.
 
 The access token stays in the adapter process. The rotating refresh credential is stored only in the operating-system keyring. The workspace registry contains identifiers and names only; it never contains credentials.
 
@@ -19,7 +19,7 @@ The plugin does not:
 The WSL user session needs all of the following:
 
 1. Node.js 18 or newer.
-2. Either a supported Linux browser executable available through WSLg (`firefox`, `firefox-esr`, `google-chrome`, `chromium`, `chromium-browser`, or `microsoft-edge`) or a browser path for the manual URL that can return the callback to the WSL loopback listener.
+2. Broker-advertised OAuth device authorization, or a supported Linux browser/callback path for PKCE.
 3. A functioning Secret Service implementation available on the user's D-Bus session, with the `secret-tool` command available.
 4. Network access to the documented OAuth issuer and MCP/API origin.
 
@@ -29,22 +29,26 @@ Run `inspect_runtime_capabilities` before starting interactive authorization. In
 
 `CONTENTTRAKER_DELEGATED_FLOW=auto` uses device authorization instead of the manual loopback flow when the live authorization-server metadata advertises it. The tool then returns a `verificationUri` and `userCode`; it never returns the opaque device code.
 
-For manual interaction:
+For delegated interaction:
 
-1. Call `begin_contenttraker_authorization`.
-2. Open the returned `authorizationUrl` inside the intended Linux isolation boundary before `expiresAt`.
-3. Call `get_contenttraker_authorization_status`, optionally with `waitSeconds` from 0 through 15, until it reports `authorized` or a terminal failure.
+1. Call `begin_contenttraker_login`.
+2. For device code, open `verificationUri` on any device and enter `userCode`; for PKCE, open `authorizationUrl` where the callback can reach the WSL listener.
+3. Call `poll_contenttraker_login`, optionally with `waitSeconds` from 0 through 15, until it reports `authorized` or a terminal failure.
 4. Call `get_current_user` and verify the effective ContentTraker identity.
 
-The authorization URL contains one-time OAuth request parameters, but the code verifier, authorization code, access token, and refresh credential are never returned by the tool. `cancel_contenttraker_authorization` closes only a pending local listener; it does not revoke an issued credential.
+The verification/user code is safe to display, but the opaque device code, PKCE verifier, authorization code, access token, and refresh credential are never returned by the tool. A failed optional browser launch leaves device polling active. `cancel_contenttraker_authorization` closes only a pending local flow; it does not revoke an issued credential.
 
-The default credential profile is `default`. Set `CONTENTTRAKER_CREDENTIAL_PROFILE` before launching Codex when the WSL distribution needs more than one durable ContentTraker identity. Each profile binds to exactly one server-issued subject and cannot be silently overwritten by another user. A subsequent task in the same WSL user session reads the profile from Secret Service and rotates its refresh credential without repeating browser authorization.
+The default credential profile is `default`. Its key includes the normalized required user email and excludes connection/session IDs. Each profile binds to exactly one server-issued subject and cannot be silently overwritten by another user. A subsequent task in the same WSL user session reads the profile from Secret Service, rotates its refresh credential, and then verifies `/me` before business operations without repeating interactive authorization.
 
 ## Fail-closed behavior
 
-If URL launch, loopback callback, native keyring loading, keyring access, token validation, `GET /me`, or host identity matching fails, the plugin stops at that layer. Do not work around the failure with a copied token, a committed credential, a desktop connector session, or a plaintext token cache.
+If broker capability, callback, keyring availability/unlock, token validation, `GET /me`, or host identity matching fails, the plugin stops at that exact layer. Do not work around the failure with a copied token, a committed credential, a desktop connector session, or a plaintext token cache.
 
-The current staging ContentTraker OAuth metadata advertises authorization-code and refresh-token grants. It does not advertise a device endpoint or OAuth device-code grant. The plugin-side provider is ready, but a host that cannot open the displayed URL and route the callback to its loopback listener remains blocked until the authorization server publishes device authorization or another supported flow.
+The 2026-07-21 staging metadata evidence advertises authorization-code and refresh-token grants but no device endpoint or device-code grant. The plugin-side RFC 8628 provider is ready; a clean headless host remains blocked until the authorization server publishes the device contract described in [Authorization interaction](authorization-interaction.md). Re-run `inspect_contenttraker_oauth_metadata` when remote verification is authorized rather than treating this dated evidence as current forever.
+
+## Clean headless acceptance
+
+Start WSL with no display variables, Windows interoperability, or drive automount. Verify `inspect_runtime_capabilities` reports headless/manual interaction and Linux Secret Service. Then inspect OAuth metadata, run the explicit device login, verify `/me`, list workspaces, select an explicit workspace ID, restart Codex and WSL, and repeat `/me` plus workspace listing without login. A draft write is a separate step requiring fresh approval and a stable idempotency key. Confirm the test used no Windows executable, credential, connector, cookie, mounted drive, or filesystem token.
 
 ## Host identity check
 

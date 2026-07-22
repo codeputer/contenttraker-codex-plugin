@@ -11,6 +11,7 @@ Configuration describes non-secret policy and host capabilities. Credentials nev
 | Browser interaction | `CONTENTTRAKER_BROWSER_MODE` | `auto`, `system`, `manual`, `wsl-native` | `auto` |
 | Credential provider | `CONTENTTRAKER_CREDENTIAL_STORE` | `auto`, `windows-credential-manager`, `macos-keychain`, `linux-secret-service`, `memory` | `auto` |
 | Delegated profile | `CONTENTTRAKER_CREDENTIAL_PROFILE` | 1-64 letters, numbers, dots, underscores, or hyphens | `default` |
+| Required user | `CONTENTTRAKER_REQUIRED_USER_EMAIL` | Case-insensitive exact email policy, for example `operator@example.org` | Unset |
 
 The marketplace manifest fixes only the safe ContentTraker target default, `staging`. It does not force an authentication, browser, credential, workspace, customer, or user choice.
 
@@ -24,6 +25,10 @@ The marketplace manifest fixes only the safe ContentTraker target default, `stag
 6. Apply the explicit browser and credential-provider choices, or capability-probe their `auto` values.
 7. Before interaction, live OAuth metadata must validate the target resource, authority, endpoints, grants, PKCE, public client, bearer method, and scopes.
 8. Any missing layer returns `blocked` or `invalid`; the plugin does not fall back to a raw token, browser cookie, connector session, plaintext file, or Windows browser bridge from WSL.
+
+Business API tools never initiate interactive authorization. Call `begin_contenttraker_login` and `poll_contenttraker_login`; `get_current_user` returns `authentication_required` when no credential can be restored.
+
+Workspace context has a separate fail-closed precedence: explicit `workspaceId`, explicit `workspaceName`, exact repository/project registry mapping, then environment default. When an explicit candidate differs from the exact registry mapping, the result is `workspace_conflict`; both candidates are reported and neither is selected. The caller must choose a workspace and update the local registry through `upsert_contenttraker_registry_mapping` only when that separate local change is intended.
 
 Non-container user hosts select delegated OAuth by default. Containers and CI select workload OAuth and currently stop at the workload layer because staging advertises no supported workload grant and the plugin has no host workload provider. For an intentionally interactive one-off container, set both `CONTENTTRAKER_AUTH_MODE=delegated` and `CONTENTTRAKER_CREDENTIAL_STORE=memory`; the authorization disappears with the process.
 

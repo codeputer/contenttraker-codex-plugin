@@ -10,20 +10,22 @@ An installation's authenticated ContentTraker user is a separate runtime identit
 
 ## Release status
 
-The plugin package is installable and its MCP process starts without the private ContentTraker repository. Delegated sign-in uses ContentTraker's authorization-code flow with PKCE and does not reuse a ChatGPT desktop connector session.
+The plugin package is installable and its MCP process starts without the private ContentTraker repository. Delegated sign-in uses capability-negotiated OAuth device authorization or authorization code with PKCE and never reuses a ChatGPT desktop connector session.
 
 An isolated WSL host must also provide:
 
 - Node.js 18 or newer;
-- either a Linux browser available through WSLg or a way to open a displayed manual authorization URL in a browser that can return to the WSL loopback callback; and
+- authorization-server support for RFC 8628 device authorization, or a browser path that can return an authorization-code callback to the WSL loopback listener; and
 - a working Linux Secret Service keyring for the host user.
 
-Windows browser interoperability remains disabled inside WSL. If a WSL-native browser is unavailable, the plugin returns a manual URL and keeps the loopback listener alive while authorization is pending. If the browser/loopback path or keyring is unavailable, authentication stops. There is no bearer-token argument, plaintext credential file, browser-cookie import, or connector-session fallback. See [WSL authentication](docs/wsl-authentication.md).
+Windows browser interoperability remains disabled inside WSL. On a headless host, the plugin uses device authorization only when live metadata advertises both its endpoint and grant. The user may open the verification URL elsewhere, but the WSL adapter performs every token exchange and stores the refresh credential only in its Linux Secret Service keyring. If neither device authorization nor a usable loopback path is available, authentication stops at the broker-capability layer. See [WSL authentication](docs/wsl-authentication.md).
 
 ## Install a reviewed release
 
+Version `0.2.0` is the prepared release candidate and is not available by tag until the maintainer explicitly publishes `v0.2.0`. After publication:
+
 ```bash
-codex plugin marketplace add https://github.com/codeputer/contenttraker-codex-plugin.git --ref v0.1.2
+codex plugin marketplace add https://github.com/codeputer/contenttraker-codex-plugin.git --ref v0.2.0
 codex plugin marketplace list
 codex plugin list
 codex plugin add contenttraker@contenttraker
@@ -41,11 +43,13 @@ Use the unauthenticated `inspect_runtime_capabilities` tool before authenticatio
 
 Host prerequisites and current evidence are tracked in [Platform support](docs/platform-support.md) and the [Cross-platform verification matrix](docs/verification-matrix.md).
 
+Failure diagnostics and safe recovery steps are in [Troubleshooting](docs/troubleshooting.md).
+
 Use `inspect_contenttraker_oauth_metadata` to validate the live protected-resource and authorization-server contract before authentication. Authorization begins only after exact resource/issuer binding, HTTPS endpoints, code and refresh grants, public-client exchange, PKCE `S256`, bearer headers, and every requested scope are confirmed. See [OAuth metadata](docs/oauth-metadata.md).
 
-Interactive authorization supports platform browser launch on Windows, macOS, and non-WSL Linux; direct Linux-browser launch inside WSL; a manual loopback URL; and OAuth device authorization when live server metadata advertises it. `CONTENTTRAKER_DELEGATED_FLOW=auto` keeps authorization code + PKCE for browser-capable hosts and prefers device code for manual/headless interaction when available. Use `begin_contenttraker_authorization`, then poll `get_contenttraker_authorization_status` (optionally waiting up to 15 seconds per call). See [Authorization interaction](docs/authorization-interaction.md).
+Interactive authorization supports platform browser launch, a manual loopback URL, and OAuth device authorization when live server metadata advertises it. `CONTENTTRAKER_DELEGATED_FLOW=auto` keeps authorization code + PKCE for browser-capable hosts and prefers device code for manual/headless interaction when available. Use `begin_contenttraker_login`, then `poll_contenttraker_login` (optionally waiting up to 15 seconds per call). Browser launch is only a convenience; a failed launch leaves the returned flow active. The v0.1 authorization tool names remain as compatibility aliases. See [Authorization interaction](docs/authorization-interaction.md).
 
-Delegated refresh credentials use Windows Credential Manager, macOS Keychain, or Linux Secret Service according to host capabilities. `CONTENTTRAKER_CREDENTIAL_PROFILE` defaults to `default` and gives the credential a durable, connection-independent lookup key. A new Codex task refreshes that profile without repeating browser authorization. Containers and CI do not auto-select a user keyring; explicit delegated mode may use an explicitly selected ephemeral memory store, while unattended operation requires supported workload OAuth. See [Credential storage](docs/credential-storage.md).
+Delegated refresh credentials use an OS keyring according to host capabilities. `CONTENTTRAKER_CREDENTIAL_PROFILE` defaults to `default`; its persistent lookup key is stable across tasks and includes environment, issuer, audience, client ID, profile, and normalized `CONTENTTRAKER_REQUIRED_USER_EMAIL`. Connection and session IDs are excluded. A new Codex task refreshes that credential without repeating interactive authorization. See [Credential storage](docs/credential-storage.md).
 
 ## Authentication and host identity policy
 
@@ -73,22 +77,28 @@ The value is a host policy input, not a credential, and is not built into the pl
 
 Normal verification order:
 
-1. `get_current_user`
-2. `list_workspaces`
-3. `resolve_contenttraker_context`
-4. `list_digital_asset_types`
-5. `create_digital_asset` with explicit user approval, a stable idempotency key, and `status: "draft"`
+1. `inspect_contenttraker_oauth_metadata`
+2. `begin_contenttraker_login` when `get_contenttraker_auth_status` reports `idle`
+3. `poll_contenttraker_login`, then `get_current_user`
+4. `list_workspaces`
+5. `resolve_contenttraker_context` with an explicit `workspaceId` or `workspaceName`
+6. `list_digital_asset_types`
+7. `create_digital_asset` with the exact approved destination, a stable idempotency key, and `status: "draft"`
+
+`get_current_user` never starts interactive login. Without a recoverable keyring credential it returns `authentication_required` with the explicit login-tool sequence.
+
+Workspace resolution precedence is explicit `workspaceId`, explicit `workspaceName`, exact repository/project registry mapping, then environment default. An explicit workspace that differs from the exact mapping returns `workspace_conflict` with both non-sensitive candidates and performs no API operation. Every write repeats `/me` verification and confirms the exact workspace ID appears in the authenticated user's `/workspaces` response.
 
 Workspace names are runtime inputs. No customer identity, workspace, or project is hardcoded in this repository.
 
 ## Upgrade
 
-Pin a new reviewed tag by replacing the marketplace snapshot:
+Codex treats the marketplace Git ref as a snapshot. A different `--ref` does not replace the installed snapshot in place; remove the plugin and marketplace entry, then add the new ref and restart Codex:
 
 ```bash
 codex plugin remove contenttraker@contenttraker
 codex plugin marketplace remove contenttraker
-codex plugin marketplace add https://github.com/codeputer/contenttraker-codex-plugin.git --ref v0.1.2
+codex plugin marketplace add https://github.com/codeputer/contenttraker-codex-plugin.git --ref v0.2.0
 codex plugin add contenttraker@contenttraker
 ```
 
@@ -103,7 +113,7 @@ codex plugin marketplace remove contenttraker
 
 Removing the plugin does not delete operating-system keyring entries. Revoke ContentTraker authorization through the supported account/security workflow if access must be withdrawn.
 
-Before removal, `forget_contenttraker_credential` with confirmation `FORGET_CONTENTTRAKER_CREDENTIAL` deletes the selected local profile. This does not revoke the server authorization; use the ContentTraker account security workflow for that separate action.
+Before removal, `logout_contenttraker` with confirmation `LOGOUT_CONTENTTRAKER` deletes the selected v2 local keyring credential. `forget_contenttraker_credential` remains available for compatibility. Neither tool revokes server authorization; use the ContentTraker account security workflow for that separate action.
 
 ## Build and verify
 

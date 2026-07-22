@@ -75,6 +75,7 @@ export interface OAuthAuthorizationSession {
   intervalSeconds?: number;
   expiresAt: string;
   interactionMode: OAuthInteractionMode;
+  launchDiagnostic?: string;
   complete(): Promise<OAuthTokenResponse>;
   cancel(): Promise<void>;
 }
@@ -166,9 +167,9 @@ export class ContentTrakerOAuthClient {
     if (launchBrowser && this.browserLauncher.mode !== "manual-url") {
       try {
         await this.browserLauncher.open(authorizationUrl);
-      } catch (error) {
-        await session.cancel();
-        throw error;
+      } catch {
+        session.launchDiagnostic =
+          "The optional browser launch failed. Open authorizationUrl manually; the adapter is still waiting on its local callback.";
       }
     }
 
@@ -272,9 +273,9 @@ export class ContentTrakerOAuthClient {
     if (launchBrowser && this.browserLauncher.mode !== "manual-url" && this.browserLauncher.mode !== "invalid") {
       try {
         await this.browserLauncher.open(new URL(authorizationUrl));
-      } catch (error) {
-        await session.cancel();
-        throw error;
+      } catch {
+        session.launchDiagnostic =
+          "The optional browser launch failed. Open verificationUri on another device and enter userCode; device polling remains active in this process.";
       }
     }
 

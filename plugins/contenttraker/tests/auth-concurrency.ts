@@ -34,6 +34,10 @@ async function concurrentUsersRetainDistinctCallerIdentity(): Promise<void> {
   const clientB = new EnvironmentContentTrakerApiClient(providerB, server);
   const contextA = security("connection-a", "session-a", "request-a");
   const contextB = security("connection-b", "session-b", "request-b");
+  await Promise.all([
+    providerA.getAuthorizationHeader(contextA),
+    providerB.getAuthorizationHeader(contextB),
+  ]);
 
   const [resultA, resultB] = await Promise.all([
     clientA.probeReadiness(undefined, contextA),
@@ -96,6 +100,10 @@ async function workspaceAndIdentityNeverCross(): Promise<void> {
   const workspaceB = workspace("workspace-b");
   const securityA = security("connection-e", "session-e", "request-e");
   const securityB = security("connection-f", "session-f", "request-f");
+  await Promise.all([
+    providerA.getAuthorizationHeader(securityA),
+    providerB.getAuthorizationHeader(securityB),
+  ]);
 
   await Promise.all([
     clientA.listDigitalAssetTypes({}, workspaceA, securityA),
@@ -163,6 +171,7 @@ async function inFlightRequestRetainsCapturedCredential(): Promise<void> {
   const client = new EnvironmentContentTrakerApiClient(provider, server);
   const context = security("connection-i", "session-i", "request-i");
   const selectedWorkspace = workspace("workspace-i");
+  await provider.getAuthorizationHeader(context);
 
   const request = client.listDigitalAssetTypes({}, selectedWorkspace, context);
   await reachedTransport.promise;
@@ -214,6 +223,7 @@ async function effectiveCallerVerificationAndAudienceBindingAreMandatory(): Prom
   const server = new RecordingServerApiClient();
   const client = new EnvironmentContentTrakerApiClient(provider, server);
   const context = security("connection-origin", "session-origin", "request-origin");
+  await provider.getAuthorizationHeader(context);
   const result = await client.listDigitalAssetTypes({}, workspace("workspace-origin"), context);
 
   assert.equal(result.status, "ready");
@@ -245,7 +255,9 @@ async function secretsAreRedactedAndUnsupportedModesFailClosed(): Promise<void> 
   const provider = new DelegatedContentTrakerTokenProvider(new MemoryCredentialStore(), oauth as never, delegatedEnv());
   const throwingServer = new ThrowingServerApiClient("Authorization: Bearer raw-token refresh_token=raw-refresh cookie=raw-cookie");
   const client = new EnvironmentContentTrakerApiClient(provider, throwingServer);
-  const result = await client.listDigitalAssetTypes({}, workspace("workspace-k"), security("connection-k", "session-k", "request-k"));
+  const context = security("connection-k", "session-k", "request-k");
+  await provider.getAuthorizationHeader(context);
+  const result = await client.listDigitalAssetTypes({}, workspace("workspace-k"), context);
   const serialized = JSON.stringify(result);
   assert.equal(serialized.includes("raw-token"), false);
   assert.equal(serialized.includes("raw-refresh"), false);
@@ -284,6 +296,7 @@ async function parallelUnauthorizedRetriesUseOneRefresh(): Promise<void> {
   const provider = new DelegatedContentTrakerTokenProvider(new MemoryCredentialStore(), oauth as never, delegatedEnv());
   const server = new UnauthorizedUntilRefreshServer(new Barrier(8));
   const client = new EnvironmentContentTrakerApiClient(provider, server);
+  await provider.getAuthorizationHeader(security("connection-m", "session-m", "authorize"));
 
   const results = await Promise.all(Array.from({ length: 8 }, (_, index) =>
     client.listDigitalAssetTypes(

@@ -53,7 +53,7 @@ export function setContentTrakerTokenProviderForInternalTest(provider: ContentTr
 
 const server = new McpServer({
   name: "contenttraker",
-  version: "0.1.2",
+  version: "0.2.0",
 });
 
 server.registerTool(
@@ -129,6 +129,23 @@ server.registerTool(
 );
 
 server.registerTool(
+  "begin_contenttraker_login",
+  {
+    title: "Begin ContentTraker Login",
+    description: "Start or reuse the explicit delegated device-code or PKCE login flow without exposing credentials.",
+    inputSchema: {},
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  },
+  async (_input, extra) => {
+    const result = await tokenProvider.beginAuthorization(securityContextFactory.create(extra));
+    return {
+      content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+      structuredContent: result as unknown as Record<string, unknown>,
+    };
+  },
+);
+
+server.registerTool(
   "get_contenttraker_authorization_status",
   {
     title: "Get ContentTraker Authorization Status",
@@ -155,6 +172,32 @@ server.registerTool(
     };
   },
 );
+
+for (const toolName of ["poll_contenttraker_login", "get_contenttraker_auth_status"] as const) {
+  server.registerTool(
+    toolName,
+    {
+      title: toolName === "poll_contenttraker_login"
+        ? "Poll ContentTraker Login"
+        : "Get ContentTraker Authentication Status",
+      description: "Report or briefly wait for delegated login status without returning credentials or calling a business API.",
+      inputSchema: {
+        waitSeconds: z.number().int().min(0).max(15).optional().describe("Optional bounded wait for login completion."),
+      },
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    async (input, extra) => {
+      const result = await tokenProvider.getAuthorizationStatus(
+        securityContextFactory.create(extra),
+        (input.waitSeconds ?? 0) * 1_000,
+      );
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+        structuredContent: result as unknown as Record<string, unknown>,
+      };
+    },
+  );
+}
 
 server.registerTool(
   "cancel_contenttraker_authorization",
@@ -238,6 +281,45 @@ server.registerTool(
 );
 
 server.registerTool(
+  "logout_contenttraker",
+  {
+    title: "Log Out of ContentTraker",
+    description: "Cancel pending login, clear in-process state, and delete the configured delegated refresh credential from the OS keyring.",
+    inputSchema: { confirmation: z.literal("LOGOUT_CONTENTTRAKER") },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+  },
+  async (_input, extra) => {
+    const context = securityContextFactory.create(extra);
+    const before = tokenProvider.getStatus(context);
+    try {
+      await tokenProvider.invalidate(context);
+      const result = {
+        status: "logged_out",
+        credentialProfile: before.credentialProfile,
+        credentialStore: before.credentialStore,
+        serverAuthorizationRevoked: false,
+        diagnostics: ["Local delegated state and the v2 OS-keyring credential were deleted. Use the ContentTraker security workflow for server-side revocation."],
+      };
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+        structuredContent: result,
+      };
+    } catch {
+      const result = {
+        status: "blocked",
+        credentialProfile: before.credentialProfile,
+        credentialStore: before.credentialStore,
+        diagnostics: ["Logout could not delete the selected OS-keyring credential. Unlock the keyring and retry."],
+      };
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+        structuredContent: result,
+      };
+    }
+  },
+);
+
+server.registerTool(
   "get_current_user",
   {
     title: "Get Authenticated ContentTraker User",
@@ -281,6 +363,7 @@ server.registerTool(
       "Resolve the ContentTraker workspace and project context for the current Codex project without writing ContentTraker data.",
     inputSchema: {
       projectName: z.string().optional().describe("Local project or repository name."),
+      workspaceId: z.string().optional().describe("Explicit ContentTraker workspace identifier."),
       workspaceName: z.string().optional().describe("Preferred ContentTraker workspace name."),
       repositoryRoot: z.string().optional().describe("Absolute local repository root path."),
     },
@@ -314,6 +397,7 @@ server.registerTool(
       "Probe configured ContentTraker API readiness with read-only GET requests and redacted token reporting.",
     inputSchema: {
       projectName: z.string().optional().describe("Local project or repository name."),
+      workspaceId: z.string().optional().describe("Explicit ContentTraker workspace identifier."),
       workspaceName: z.string().optional().describe("Preferred ContentTraker workspace name."),
       repositoryRoot: z.string().optional().describe("Absolute local repository root path."),
     },
@@ -347,6 +431,7 @@ server.registerTool(
       "Report which ContentTraker server-side API capabilities the TypeScript adapter SDK can use, without calling the remote server-side MCP.",
     inputSchema: {
       projectName: z.string().optional().describe("Local project or repository name."),
+      workspaceId: z.string().optional().describe("Explicit ContentTraker workspace identifier."),
       workspaceName: z.string().optional().describe("Preferred ContentTraker workspace name."),
       repositoryRoot: z.string().optional().describe("Absolute local repository root path."),
     },
@@ -379,6 +464,7 @@ server.registerTool(
     description: "List valid digital asset type keys from the shared ContentTraker application logic.",
     inputSchema: {
       projectName: z.string().optional().describe("Local project or repository name used to resolve the workspace registry mapping."),
+      workspaceId: z.string().optional().describe("Explicit ContentTraker workspace identifier."),
       workspaceName: z.string().optional().describe("Preferred ContentTraker workspace name used to resolve the workspace registry mapping."),
       repositoryRoot: z.string().optional().describe("Absolute local repository root path used to resolve the workspace registry mapping."),
     },
@@ -400,6 +486,7 @@ server.registerTool(
     description: "Read one digital asset from the resolved ContentTraker workspace through the shared application logic.",
     inputSchema: {
       projectName: z.string().optional().describe("Local project or repository name used to resolve the workspace registry mapping."),
+      workspaceId: z.string().optional().describe("Explicit ContentTraker workspace identifier."),
       workspaceName: z.string().optional().describe("Preferred ContentTraker workspace name used to resolve the workspace registry mapping."),
       repositoryRoot: z.string().optional().describe("Absolute local repository root path used to resolve the workspace registry mapping."),
       digitalAssetId: z.string().min(1).describe("Digital asset ID."),
@@ -431,6 +518,7 @@ server.registerTool(
     description: "Search digital assets in the resolved ContentTraker workspace through the shared application logic.",
     inputSchema: {
       projectName: z.string().optional().describe("Local project or repository name used to resolve the workspace registry mapping."),
+      workspaceId: z.string().optional().describe("Explicit ContentTraker workspace identifier."),
       workspaceName: z.string().optional().describe("Preferred ContentTraker workspace name used to resolve the workspace registry mapping."),
       repositoryRoot: z.string().optional().describe("Absolute local repository root path used to resolve the workspace registry mapping."),
       query: z.string().optional().describe("Search text. Empty returns the newest matching assets."),
@@ -466,6 +554,7 @@ server.registerTool(
       "Store a ContentTraker digital asset directly in the resolved workspace with draft, published, or archived lifecycle status. Defaults to draft. Project is optional provenance.",
     inputSchema: {
       projectName: z.string().optional().describe("Local project or repository name used only to resolve the workspace registry mapping."),
+      workspaceId: z.string().optional().describe("Explicit ContentTraker workspace identifier."),
       workspaceName: z.string().optional().describe("Preferred ContentTraker workspace name used only to resolve the workspace registry mapping."),
       repositoryRoot: z.string().optional().describe("Absolute local repository root path used only to resolve the workspace registry mapping."),
       title: z.string().min(1).describe("Digital asset title."),
@@ -515,6 +604,7 @@ server.registerTool(
     description: "Begin the shared bounded large-file upload workflow for a ContentTraker digital asset.",
     inputSchema: {
       projectName: z.string().optional(),
+      workspaceId: z.string().optional(),
       workspaceName: z.string().optional(),
       repositoryRoot: z.string().optional(),
       title: z.string().min(1),
@@ -549,6 +639,7 @@ server.registerTool(
     description: "Stage one idempotent bounded chunk through the shared large-file upload workflow.",
     inputSchema: {
       projectName: z.string().optional(),
+      workspaceId: z.string().optional(),
       workspaceName: z.string().optional(),
       repositoryRoot: z.string().optional(),
       uploadSessionId: z.string().min(1),
@@ -580,6 +671,7 @@ server.registerTool(
     description: "Commit staged chunks and create digital asset metadata through the shared large-file upload workflow.",
     inputSchema: {
       projectName: z.string().optional(),
+      workspaceId: z.string().optional(),
       workspaceName: z.string().optional(),
       repositoryRoot: z.string().optional(),
       uploadSessionId: z.string().min(1),
@@ -619,6 +711,7 @@ server.registerTool(
     description: "Update an existing draft digital asset through the shared ContentTraker application logic.",
     inputSchema: {
       projectName: z.string().optional().describe("Local project or repository name used to resolve the workspace registry mapping."),
+      workspaceId: z.string().optional().describe("Explicit ContentTraker workspace identifier."),
       workspaceName: z.string().optional().describe("Preferred ContentTraker workspace name used to resolve the workspace registry mapping."),
       repositoryRoot: z.string().optional().describe("Absolute local repository root path used to resolve the workspace registry mapping."),
       digitalAssetId: z.string().min(1).describe("Digital asset ID."),
@@ -649,6 +742,7 @@ server.registerTool(
       "Change a ContentTraker digital asset to draft, published, or archived. Publishing queues search indexing; draft/archive queues removal.",
     inputSchema: {
       projectName: z.string().optional().describe("Local project or repository name used to resolve the workspace registry mapping."),
+      workspaceId: z.string().optional().describe("Explicit ContentTraker workspace identifier."),
       workspaceName: z.string().optional().describe("Preferred ContentTraker workspace name used to resolve the workspace registry mapping."),
       repositoryRoot: z.string().optional().describe("Absolute local repository root path used to resolve the workspace registry mapping."),
       digitalAssetId: z.string().min(1).describe("Digital asset ID returned by create_digital_asset or ContentTraker."),
