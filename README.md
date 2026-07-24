@@ -22,10 +22,10 @@ Windows browser interoperability remains disabled inside WSL. On a headless host
 
 ## Install a reviewed release
 
-Version `0.2.0` is the prepared release candidate and is not available by tag until the maintainer explicitly publishes `v0.2.0`. After publication:
+Version `0.3.0` is a prepared development candidate on top of the unpublished `0.2.0` release line. It is not available by tag until that release lineage is reviewed and published. After `v0.3.0` is published:
 
 ```bash
-codex plugin marketplace add https://github.com/codeputer/contenttraker-codex-plugin.git --ref v0.2.0
+codex plugin marketplace add https://github.com/codeputer/contenttraker-codex-plugin.git --ref v0.3.0
 codex plugin marketplace list
 codex plugin list
 codex plugin add contenttraker@contenttraker
@@ -81,13 +81,59 @@ Normal verification order:
 2. `begin_contenttraker_login` when `get_contenttraker_auth_status` reports `idle`
 3. `poll_contenttraker_login`, then `get_current_user`
 4. `list_workspaces`
-5. `resolve_contenttraker_context` with an explicit `workspaceId` or `workspaceName`
-6. `list_digital_asset_types`
-7. `create_digital_asset` with the exact approved destination, a stable idempotency key, and `status: "draft"`
+5. `$contenttraker-select`, which calls `confirm_contenttraker_context` after live verification and human confirmation
+6. `resolve_contenttraker_context` with the absolute `repositoryRoot`
+7. `list_digital_asset_types`
+8. `create_digital_asset` with the exact approved destination, a stable idempotency key, and `status: "draft"`
 
 `get_current_user` never starts interactive login. Without a recoverable keyring credential it returns `authentication_required` with the explicit login-tool sequence.
 
-Workspace resolution precedence is explicit `workspaceId`, explicit `workspaceName`, exact repository/project registry mapping, then environment default. An explicit workspace that differs from the exact mapping returns `workspace_conflict` with both non-sensitive candidates and performs no API operation. Every write repeats `/me` verification and confirms the exact workspace ID appears in the authenticated user's `/workspaces` response.
+## Durable worktree context
+
+`$contenttraker-select` saves the exact workspace and optional project agreed with the user in `.contenttraker-codex/context.json` at the Git worktree root. The underlying `confirm_contenttraker_context` tool authenticates first, verifies the effective ContentTraker user, and confirms that the workspace and optional project are currently authorized. It then records a versioned, human-confirmed context for the active `staging` or `production` environment.
+
+The marker is an environment-indexed envelope:
+
+```json
+{
+  "schemaVersion": 1,
+  "contexts": {
+    "staging": {
+      "environment": "staging",
+      "repositoryIdentity": "owner/repository",
+      "worktreeId": "sha256:...",
+      "workspaceId": "...",
+      "workspaceKey": "...",
+      "workspaceName": "...",
+      "projectId": "...",
+      "projectKey": "...",
+      "projectName": "...",
+      "confirmationState": "human-confirmed",
+      "confirmedAtUtc": "2026-07-24T00:00:00.000Z",
+      "pluginName": "contenttraker",
+      "pluginVersion": "..."
+    }
+  },
+  "resets": {}
+}
+```
+
+Workspace resolution precedence is:
+
+1. explicit per-call `workspaceId`, `workspaceKey`, or `workspaceName`;
+2. the live-authorized human-confirmed marker for the current worktree and environment;
+3. an exact environment-scoped registry mapping when no reset tombstone applies;
+4. live resolution and the smallest necessary user confirmation.
+
+The adapter's process directory is the installed plugin, not the user's repository. Without an explicit workspace selector, callers must pass the absolute `repositoryRoot`. A missing root, malformed marker, environment mismatch, repository/worktree mismatch, unauthorized workspace, or invalid project fails closed and does not silently fall back to a different workspace.
+
+The plugin adds the marker and its atomic temporary files to the Git worktree's private `info/exclude` file. It does not modify the repository's tracked `.gitignore`. The marker accepts identifiers, names, timestamps, and plugin provenance only; token, credential, cookie, keyring, secret, and authorization fields are rejected.
+
+`$contenttraker-reset` calls `reset_contenttraker_context`. Reset clears only the current worktree and active environment's marker binding and exact registry mapping, then records a reset tombstone so a stale registry default cannot immediately reselect a workspace. It preserves OAuth/keyring authentication, other worktrees, every valid other-environment marker entry, and every remote ContentTraker asset. If the whole marker is unreadable or untrusted, reset replaces it safely and reports that other-environment marker preservation could not be proven.
+
+Current plugins expose these workflows as skills and MCP tools. Native `/contenttraker-select` and `/contenttraker-reset` aliases are not part of the supported plugin contract; use the `$` skill names or a plain-language request.
+
+Every ContentTraker operation using a saved marker revalidates its workspace and optional project against the live authenticated API. Every write also repeats the normal write-policy and approval checks.
 
 Workspace names are runtime inputs. No customer identity, workspace, or project is hardcoded in this repository.
 
@@ -98,7 +144,7 @@ Codex treats the marketplace Git ref as a snapshot. A different `--ref` does not
 ```bash
 codex plugin remove contenttraker@contenttraker
 codex plugin marketplace remove contenttraker
-codex plugin marketplace add https://github.com/codeputer/contenttraker-codex-plugin.git --ref v0.2.0
+codex plugin marketplace add https://github.com/codeputer/contenttraker-codex-plugin.git --ref v0.3.0
 codex plugin add contenttraker@contenttraker
 ```
 
@@ -124,7 +170,7 @@ npm test
 npm run release-artifact
 ```
 
-The committed `dist/server.mjs` bundles the runtime JavaScript so Codex can start the adapter without running `npm install`. Delegated authentication uses the WSL user's Secret Service through `secret-tool`; no native Node package is downloaded at install time.
+The committed `dist/server.mjs` bundles the runtime JavaScript so Codex can start the adapter without running `npm install`. Delegated authentication uses the selected host's operating-system credential provider; no native Node package is downloaded at install time.
 
 ## Security and licence
 

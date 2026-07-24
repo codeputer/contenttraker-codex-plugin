@@ -1,8 +1,5 @@
 import type { ContentTrakerApiClient } from "../contenttraker-api-client.js";
-import {
-  loadWorkspaceRegistry,
-  resolveContextFromRegistry,
-} from "../workspace-registry.js";
+import { resolveOperationContext } from "../context-resolution.js";
 import type { ApiReadinessResult, ContentTrakerRequestSecurityContext, ProbeApiReadinessInput } from "../types.js";
 
 export async function probeContentTrakerApiReadiness(
@@ -10,15 +7,23 @@ export async function probeContentTrakerApiReadiness(
   apiClient: ContentTrakerApiClient,
   securityContext: ContentTrakerRequestSecurityContext,
 ): Promise<ApiReadinessResult> {
-  const api = apiClient.getStatus(securityContext);
-  const registry = loadWorkspaceRegistry(api.environmentProfile.name);
-  const selectedContext = resolveContextFromRegistry(input, registry);
-  const result = await apiClient.probeReadiness(selectedContext, securityContext);
+  const resolution = await resolveOperationContext(input, apiClient, securityContext);
+  if (resolution.blocked) {
+    return {
+      status: resolution.failureStatus ?? "blocked",
+      api: apiClient.getStatus(securityContext),
+      contextCorrelationIds: resolution.correlationIds,
+      checks: [],
+      diagnostics: resolution.diagnostics,
+    };
+  }
+  const result = await apiClient.probeReadiness(resolution.selectedContext, securityContext);
 
   return {
     ...result,
+    contextCorrelationIds: resolution.correlationIds,
     diagnostics: [
-      ...registry.errors,
+      ...resolution.diagnostics,
       ...result.diagnostics,
     ],
   };

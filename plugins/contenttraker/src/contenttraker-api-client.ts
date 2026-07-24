@@ -3,6 +3,7 @@ import type {
   ApiContractResult,
   ApiReadinessCheck,
   ApiReadinessResult,
+  AuthorizedContextResolutionResult,
   AppendDigitalAssetUploadChunkInput,
   BeginDigitalAssetUploadInput,
   ContentTrakerContext,
@@ -37,6 +38,10 @@ export interface ContentTrakerApiClient {
   getStatus(securityContext?: ContentTrakerRequestSecurityContext): ApiClientStatus;
   getCurrentUser(securityContext: ContentTrakerRequestSecurityContext): Promise<Record<string, unknown>>;
   listWorkspaces(searchText: string | undefined, securityContext: ContentTrakerRequestSecurityContext): Promise<Record<string, unknown>>;
+  resolveAuthorizedContext(
+    context: ContentTrakerContext,
+    securityContext: ContentTrakerRequestSecurityContext,
+  ): Promise<AuthorizedContextResolutionResult>;
   inspectApiContract(context: ContentTrakerContext | undefined, securityContext: ContentTrakerRequestSecurityContext): ApiContractResult;
   probeReadiness(context: ContentTrakerContext | undefined, securityContext: ContentTrakerRequestSecurityContext): Promise<ApiReadinessResult>;
   getDigitalAsset(input: GetDigitalAssetInput, context: ContentTrakerContext | undefined, securityContext: ContentTrakerRequestSecurityContext): Promise<GetDigitalAssetResult>;
@@ -126,6 +131,137 @@ export class EnvironmentContentTrakerApiClient implements ContentTrakerApiClient
       return { status: "ready", environment: api.environment, workspaces, correlationId: response.correlationId };
     } catch (error) {
       return { status: "failed", environment: api.environment, diagnostics: [safeErrorMessage(error)] };
+    }
+  }
+
+  async resolveAuthorizedContext(
+    context: ContentTrakerContext,
+    securityContext: ContentTrakerRequestSecurityContext,
+  ): Promise<AuthorizedContextResolutionResult> {
+    const api = this.getStatus(securityContext);
+    const correlationIds: string[] = [];
+    if (!api.environmentProfile.valid || !api.configured || !api.tokenStrategy.configured) {
+      return {
+        status: "blocked",
+        correlationIds,
+        diagnostics: [
+          "context_authorization_blocked: ContentTraker environment, API configuration, and authentication must be ready.",
+        ],
+      };
+    }
+    if (!context.workspaceId && !context.workspaceKey && !context.workspaceName) {
+      return {
+        status: "blocked",
+        correlationIds,
+        diagnostics: ["context_authorization_blocked: a workspaceId, workspaceKey, or workspaceName is required."],
+      };
+    }
+
+    try {
+      const workspaceResponse = await this.sendAuthorized(
+        "GET",
+        api,
+        "/workspaces",
+        securityContext,
+      );
+      if (workspaceResponse.correlationId) correlationIds.push(workspaceResponse.correlationId);
+      if (!workspaceResponse.ok) {
+        return {
+          status: "failed",
+          correlationIds,
+          diagnostics: [`context_authorization_failed: /workspaces returned HTTP ${workspaceResponse.statusCode}.`],
+        };
+      }
+      const workspaceMatches = matchingItems(workspaceResponse.json, {
+        id: context.workspaceId,
+        key: context.workspaceKey,
+        name: context.workspaceName,
+      }, "workspace");
+      if (workspaceMatches.length !== 1) {
+        return {
+          status: "blocked",
+          correlationIds,
+          diagnostics: [
+            workspaceMatches.length === 0
+              ? "context_workspace_not_authorized: the requested workspace was not found in the verified user's authorized workspace list."
+              : "context_workspace_ambiguous: the supplied workspace selectors matched more than one authorized workspace.",
+          ],
+        };
+      }
+      const workspace = selectableItem(workspaceMatches[0], "workspace");
+      if (!workspace.id) {
+        return {
+          status: "blocked",
+          correlationIds,
+          diagnostics: ["context_workspace_invalid: the authorized workspace did not return a stable workspaceId."],
+        };
+      }
+      const selectedContext: ContentTrakerContext = {
+        environment: api.environmentProfile.name,
+        workspaceId: workspace.id,
+        workspaceKey: workspace.key,
+        workspaceName: workspace.name,
+        source: context.source,
+      };
+
+      if (context.projectId || context.projectKey || context.projectName) {
+        const projectsResponse = await this.sendAuthorized(
+          "GET",
+          api,
+          `/workspaces/${encodeURIComponent(workspace.id)}/projects`,
+          securityContext,
+        );
+        if (projectsResponse.correlationId) correlationIds.push(projectsResponse.correlationId);
+        if (!projectsResponse.ok) {
+          return {
+            status: "failed",
+            correlationIds,
+            diagnostics: [
+              `context_project_authorization_failed: workspace projects returned HTTP ${projectsResponse.statusCode}.`,
+            ],
+          };
+        }
+        const projectMatches = matchingItems(projectsResponse.json, {
+          id: context.projectId,
+          key: context.projectKey,
+          name: context.projectName,
+        }, "project");
+        if (projectMatches.length !== 1) {
+          return {
+            status: "blocked",
+            correlationIds,
+            diagnostics: [
+              projectMatches.length === 0
+                ? "context_project_not_authorized: the requested project is not a member of the selected authorized workspace."
+                : "context_project_ambiguous: the supplied project selectors matched more than one project in the selected workspace.",
+            ],
+          };
+        }
+        const project = selectableItem(projectMatches[0], "project");
+        if (!project.id) {
+          return {
+            status: "blocked",
+            correlationIds,
+            diagnostics: ["context_project_invalid: the authorized project did not return a stable projectId."],
+          };
+        }
+        selectedContext.projectId = project.id;
+        selectedContext.projectKey = project.key;
+        selectedContext.projectName = project.name;
+      }
+
+      return {
+        status: "ready",
+        selectedContext,
+        correlationIds,
+        diagnostics: ["ContentTraker workspace and optional project were live-verified for the authenticated user."],
+      };
+    } catch (error) {
+      return {
+        status: "failed",
+        correlationIds,
+        diagnostics: [`context_authorization_failed: ${safeErrorMessage(error)}`],
+      };
     }
   }
 
@@ -307,8 +443,8 @@ export class EnvironmentContentTrakerApiClient implements ContentTrakerApiClient
     const query = new URLSearchParams();
     if (input.version !== undefined) query.set("version", String(input.version));
     if (input.includeContent !== undefined) query.set("includeContent", String(input.includeContent));
-    if (input.provenanceProjectId) query.set("projectId", input.provenanceProjectId);
-    if (input.provenanceProjectKey) query.set("projectKey", input.provenanceProjectKey);
+    if (input.provenanceProjectId ?? context?.projectId) query.set("projectId", input.provenanceProjectId ?? context!.projectId!);
+    if (input.provenanceProjectKey ?? context?.projectKey) query.set("projectKey", input.provenanceProjectKey ?? context!.projectKey!);
     const suffix = query.size > 0 ? `?${query.toString()}` : "";
     const path = `/workspaces/${encodeURIComponent(context!.workspaceId!)}/digital-assets/${encodeURIComponent(input.digitalAssetId)}${suffix}`;
 
@@ -360,8 +496,8 @@ export class EnvironmentContentTrakerApiClient implements ContentTrakerApiClient
     if (input.tags) query.set("tags", input.tags);
     if (input.limit !== undefined) query.set("limit", String(input.limit));
     if (input.includeContentSnippets !== undefined) query.set("includeContentSnippets", String(input.includeContentSnippets));
-    if (input.provenanceProjectId) query.set("projectId", input.provenanceProjectId);
-    if (input.provenanceProjectKey) query.set("projectKey", input.provenanceProjectKey);
+    if (input.provenanceProjectId ?? context?.projectId) query.set("projectId", input.provenanceProjectId ?? context!.projectId!);
+    if (input.provenanceProjectKey ?? context?.projectKey) query.set("projectKey", input.provenanceProjectKey ?? context!.projectKey!);
     const suffix = query.size > 0 ? `?${query.toString()}` : "";
     const path = `/workspaces/${encodeURIComponent(context!.workspaceId!)}/digital-assets${suffix}`;
 
@@ -485,8 +621,8 @@ export class EnvironmentContentTrakerApiClient implements ContentTrakerApiClient
       title: input.title,
       digitalAssetType: input.digitalAssetType,
       fileName: input.fileName,
-      projectId: input.provenanceProjectId,
-      projectKey: input.provenanceProjectKey,
+      projectId: input.provenanceProjectId ?? context?.projectId,
+      projectKey: input.provenanceProjectKey ?? context?.projectKey,
       format: input.format,
       sourceSystem: input.sourceSystem ?? "codex",
       sourceConversationId: input.sourceConversationId,
@@ -520,8 +656,8 @@ export class EnvironmentContentTrakerApiClient implements ContentTrakerApiClient
       chunkContent: input.chunkContent,
       contentEncoding: input.contentEncoding ?? "utf8",
       chunkSha256: input.chunkSha256,
-      projectId: input.provenanceProjectId,
-      projectKey: input.provenanceProjectKey,
+      projectId: input.provenanceProjectId ?? context?.projectId,
+      projectKey: input.provenanceProjectKey ?? context?.projectKey,
     };
     return this.sendUploadRequest("PUT", api, context, path, securityContext, body, "staged");
   }
@@ -547,8 +683,8 @@ export class EnvironmentContentTrakerApiClient implements ContentTrakerApiClient
       digitalAssetType: input.digitalAssetType,
       fileName: input.fileName,
       chunkCount: input.chunkCount,
-      projectId: input.provenanceProjectId,
-      projectKey: input.provenanceProjectKey,
+      projectId: input.provenanceProjectId ?? context?.projectId,
+      projectKey: input.provenanceProjectKey ?? context?.projectKey,
       format: input.format,
       tags: input.tags,
       sourceSystem: input.sourceSystem ?? "codex",
@@ -623,8 +759,8 @@ export class EnvironmentContentTrakerApiClient implements ContentTrakerApiClient
       title: input.title,
       digitalAssetType: input.digitalAssetType,
       content: input.content,
-      projectId: input.provenanceProjectId,
-      projectKey: input.provenanceProjectKey,
+      projectId: input.provenanceProjectId ?? context?.projectId,
+      projectKey: input.provenanceProjectKey ?? context?.projectKey,
       format: input.format ?? "markdown",
       tags: input.tags,
       sourceSystem: input.sourceSystem ?? "codex",
@@ -1130,6 +1266,39 @@ function itemListHasIdMatch(value: unknown, id: string): boolean {
     const itemId = stringValue(item.id) ?? stringValue(item.workspaceId);
     return equals(id, itemId);
   }));
+}
+
+function matchingItems(
+  value: unknown,
+  selectors: { id?: string; key?: string; name?: string },
+  kind: "workspace" | "project",
+): unknown[] {
+  const items = extractItems(value) ?? [];
+  return items.filter((item) => {
+    const candidate = selectableItem(item, kind);
+    if (selectors.id && !equals(selectors.id, candidate.id)) return false;
+    if (selectors.key && !equals(selectors.key, candidate.key)) return false;
+    if (selectors.name && !equals(selectors.name, candidate.name)) return false;
+    return Boolean(selectors.id || selectors.key || selectors.name);
+  });
+}
+
+function selectableItem(
+  value: unknown,
+  kind: "workspace" | "project",
+): { id?: string; key?: string; name?: string } {
+  if (!isRecord(value)) return {};
+  return kind === "workspace"
+    ? {
+        id: stringValue(value.id) ?? stringValue(value.workspaceId),
+        key: stringValue(value.key) ?? stringValue(value.workspaceKey),
+        name: stringValue(value.name) ?? stringValue(value.workspaceName),
+      }
+    : {
+        id: stringValue(value.id) ?? stringValue(value.projectId),
+        key: stringValue(value.key) ?? stringValue(value.projectKey),
+        name: stringValue(value.name) ?? stringValue(value.projectName),
+      };
 }
 
 function itemMatches(value: unknown, id: string | undefined, name: string | undefined): boolean {

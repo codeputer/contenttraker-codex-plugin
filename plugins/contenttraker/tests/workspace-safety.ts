@@ -26,33 +26,34 @@ function explicitWorkspaceDoesNotBecomeProjectIdentity(): void {
     environment: "staging",
     workspaceName: "Requested Workspace",
     workspaceId: undefined,
+    workspaceKey: undefined,
     source: "explicit-workspace",
   });
   assert.equal(context?.projectName, undefined);
 }
 
-function explicitWorkspaceConflictIsFailClosed(): void {
+function explicitWorkspaceWinsRegistryMapping(): void {
   const context = resolveContextFromRegistry(
     { projectName: "LocalProject", workspaceName: "Requested Workspace" },
     registry(),
   );
-  assert.equal(context?.source, "workspace-conflict");
-  assert.equal(context?.workspaceConflict?.explicit.workspaceName, "Requested Workspace");
-  assert.equal(context?.workspaceConflict?.registry.workspaceName, "Registry Workspace");
+  assert.equal(context?.source, "explicit-workspace");
+  assert.equal(context?.workspaceName, "Requested Workspace");
   assert.equal(context?.workspaceId, undefined);
+  assert.equal(context?.projectId, undefined);
 }
 
-function matchingExplicitWorkspaceKeepsOptionalProjectProvenance(): void {
+function matchingExplicitWorkspaceStillWinsOptionalRegistryProvenance(): void {
   const context = resolveContextFromRegistry(
     { projectName: "LocalProject", workspaceId: "workspace-registry", workspaceName: "Stale Display Name" },
     registry(),
   );
   assert.equal(context?.source, "explicit-workspace");
   assert.equal(context?.workspaceId, "workspace-registry");
-  assert.equal(context?.projectId, "project-provenance");
+  assert.equal(context?.projectId, undefined);
 }
 
-function corruptRegistryCannotHideAProjectConflict(): void {
+function explicitWorkspaceWinsCorruptRegistry(): void {
   const context = resolveContextFromRegistry(
     { projectName: "LocalProject", workspaceId: "workspace-explicit" },
     {
@@ -65,7 +66,8 @@ function corruptRegistryCannotHideAProjectConflict(): void {
       errors: ["invalid JSON"],
     },
   );
-  assert.equal(context, undefined);
+  assert.equal(context?.source, "explicit-workspace");
+  assert.equal(context?.workspaceId, "workspace-explicit");
 }
 
 async function unauthorizedWorkspacePreventsWrite(): Promise<void> {
@@ -115,6 +117,35 @@ async function authorizedDraftCreationRemainsIdempotent(): Promise<void> {
   assert.equal(server.postCount, 1);
   assert.equal((server.lastBody as Record<string, unknown>).idempotencyKey, "workspace-safety-idempotency");
   assert.equal((server.lastBody as Record<string, unknown>).status, "draft");
+}
+
+async function authorizedContextResolutionCanonicalizesProjectMembership(): Promise<void> {
+  const server = new FakeServerApiClient(["workspace-authorized"], ["project-authorized"]);
+  const client = new EnvironmentContentTrakerApiClient(fakeTokenProvider() as never, server);
+  const result = await client.resolveAuthorizedContext({
+    environment: "staging",
+    workspaceId: "workspace-authorized",
+    projectId: "project-authorized",
+    source: "worktree-marker",
+  }, security());
+  assert.equal(result.status, "ready");
+  assert.equal(result.selectedContext?.workspaceId, "workspace-authorized");
+  assert.equal(result.selectedContext?.projectId, "project-authorized");
+  assert.equal(result.selectedContext?.source, "worktree-marker");
+}
+
+async function staleProjectResolutionFailsClosed(): Promise<void> {
+  const server = new FakeServerApiClient(["workspace-authorized"], ["another-project"]);
+  const client = new EnvironmentContentTrakerApiClient(fakeTokenProvider() as never, server);
+  const result = await client.resolveAuthorizedContext({
+    environment: "staging",
+    workspaceId: "workspace-authorized",
+    projectId: "project-stale",
+    source: "worktree-marker",
+  }, security());
+  assert.equal(result.status, "blocked");
+  assert.equal(result.selectedContext, undefined);
+  assert.match(result.diagnostics.join(" "), /context_project_not_authorized/);
 }
 
 function registry(): RegistrySnapshot {
@@ -197,12 +228,18 @@ class FakeServerApiClient implements ContentTrakerServerApiClient {
   postCount = 0;
   lastBody: unknown;
 
-  constructor(private readonly workspaceIds: string[]) {}
+  constructor(
+    private readonly workspaceIds: string[],
+    private readonly projectIds: string[] = [],
+  ) {}
 
   async getJson(_baseUrl: string, path: string): Promise<JsonResponse> {
     this.getCount += 1;
     if (path === "/me") return response({ appUserId: "test-user", email: "operator@example.org" });
     if (path === "/workspaces") return response({ workspaces: this.workspaceIds.map((id) => ({ id })) });
+    if (path === "/workspaces/workspace-authorized/projects") {
+      return response({ projects: this.projectIds.map((id) => ({ id })) });
+    }
     return response({}, 404);
   }
 
@@ -252,13 +289,15 @@ function security(): ContentTrakerRequestSecurityContext {
 
 try {
   explicitWorkspaceDoesNotBecomeProjectIdentity();
-  explicitWorkspaceConflictIsFailClosed();
-  matchingExplicitWorkspaceKeepsOptionalProjectProvenance();
-  corruptRegistryCannotHideAProjectConflict();
+  explicitWorkspaceWinsRegistryMapping();
+  matchingExplicitWorkspaceStillWinsOptionalRegistryProvenance();
+  explicitWorkspaceWinsCorruptRegistry();
   await currentUserReturnsAuthenticationRequired();
   await unauthorizedWorkspacePreventsWrite();
   await conflictPreventsAnyApiCall();
   await authorizedDraftCreationRemainsIdempotent();
+  await authorizedContextResolutionCanonicalizesProjectMembership();
+  await staleProjectResolutionFailsClosed();
   console.log("ContentTraker workspace safety tests passed.");
 } finally {
   for (const key of Object.keys(process.env)) {

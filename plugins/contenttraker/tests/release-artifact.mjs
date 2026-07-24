@@ -10,8 +10,18 @@ const bundlePath = path.join(pluginRoot, "dist", "server.mjs");
 const packageDocument = readJson(path.join(pluginRoot, "package.json"));
 const pluginDocument = readJson(path.join(pluginRoot, ".codex-plugin", "plugin.json"));
 const mcpDocument = readJson(path.join(pluginRoot, ".mcp.json"));
+const marketplaceDocument = readJson(path.resolve(pluginRoot, "../../.agents/plugins/marketplace.json"));
+const sourceMetadata = fs.readFileSync(path.join(pluginRoot, "src", "plugin-metadata.ts"), "utf8");
 
 assert.equal(pluginDocument.version, packageDocument.version);
+assert.equal(
+  marketplaceDocument.plugins.find((plugin) => plugin.name === packageDocument.name)?.version,
+  packageDocument.version,
+);
+assert.match(
+  sourceMetadata,
+  new RegExp(`CONTENTTRAKER_PLUGIN_VERSION\\s*=\\s*"${packageDocument.version.replaceAll(".", "\\.")}"`),
+);
 assert.deepEqual(mcpDocument.mcpServers["contenttraker-codex-adapter"], {
   cwd: ".",
   command: "node",
@@ -19,6 +29,17 @@ assert.deepEqual(mcpDocument.mcpServers["contenttraker-codex-adapter"], {
   env: { CONTENTTRAKER_ENVIRONMENT: "staging" },
 });
 assert.deepEqual(packageDocument.dependencies ?? {}, {});
+for (const relativePath of [
+  path.join("skills", "contenttraker-select", "SKILL.md"),
+  path.join("skills", "contenttraker-reset", "SKILL.md"),
+]) {
+  const skillPath = path.join(pluginRoot, relativePath);
+  assert.equal(
+    fs.existsSync(skillPath) && fs.statSync(skillPath).isFile(),
+    true,
+    `Packaged plugin is missing skill ${relativePath}.`,
+  );
+}
 
 build();
 const firstHash = sha256(bundlePath);
@@ -28,6 +49,7 @@ assert.equal(secondHash, firstHash, "The production bundle is not deterministic.
 
 const bundle = fs.readFileSync(bundlePath, "utf8");
 for (const forbidden of [
+  /@napi-rs\/keyring/iu,
   /@hono\/node-server/iu,
   /serve-static|serveStatic/iu,
   /CONTENTTRAKER_INTERNAL_TEST_ADAPTER/u,
@@ -53,6 +75,8 @@ for (const expected of [
   "get_current_user",
   "list_workspaces",
   "resolve_contenttraker_context",
+  "confirm_contenttraker_context",
+  "reset_contenttraker_context",
   "probe_contenttraker_api_readiness",
   "inspect_contenttraker_api_contract",
   "list_digital_asset_types",

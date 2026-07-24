@@ -7,6 +7,7 @@ import { resolveAdapterEnvironment } from "./environment-profile.js";
 import { ContentTrakerOAuthClient } from "./oauth-client.js";
 import { ContentTrakerOAuthMetadataResolver } from "./oauth-metadata.js";
 import { ContentTrakerSecurityContextFactory } from "./security-context.js";
+import { CONTENTTRAKER_PLUGIN_VERSION } from "./plugin-metadata.js";
 import {
   createContentTrakerTokenProvider,
   type ContentTrakerTokenProvider,
@@ -14,12 +15,14 @@ import {
 import { appendDigitalAssetUploadChunk } from "./tools/append-digital-asset-upload-chunk.js";
 import { beginDigitalAssetUpload } from "./tools/begin-digital-asset-upload.js";
 import { completeDigitalAssetUpload } from "./tools/complete-digital-asset-upload.js";
+import { confirmContentTrakerContext } from "./tools/confirm-contenttraker-context.js";
 import { inspectContentTrakerApiContract } from "./tools/inspect-contenttraker-api-contract.js";
 import { inspectContentTrakerRuntimeCapabilities } from "./tools/inspect-runtime-capabilities.js";
 import { getDigitalAsset } from "./tools/get-digital-asset.js";
 import { listDigitalAssetTypes } from "./tools/list-digital-asset-types.js";
 import { probeContentTrakerApiReadiness } from "./tools/probe-contenttraker-api-readiness.js";
 import { resolveContentTrakerContext } from "./tools/resolve-contenttraker-context.js";
+import { resetContentTrakerContext } from "./tools/reset-contenttraker-context.js";
 import { searchDigitalAssets } from "./tools/search-digital-assets.js";
 import { createDigitalAsset } from "./tools/create-digital-asset.js";
 import { setDigitalAssetStatus } from "./tools/set-digital-asset-status.js";
@@ -53,7 +56,7 @@ export function setContentTrakerTokenProviderForInternalTest(provider: ContentTr
 
 const server = new McpServer({
   name: "contenttraker",
-  version: "0.2.0",
+  version: CONTENTTRAKER_PLUGIN_VERSION,
 });
 
 server.registerTool(
@@ -158,7 +161,7 @@ server.registerTool(
       readOnlyHint: true,
       destructiveHint: false,
       idempotentHint: true,
-      openWorldHint: false,
+      openWorldHint: true,
     },
   },
   async (input, extra) => {
@@ -356,6 +359,66 @@ server.registerTool(
 );
 
 server.registerTool(
+  "confirm_contenttraker_context",
+  {
+    title: "Confirm ContentTraker Context",
+    description:
+      "Live-verify and save a human-confirmed ContentTraker workspace, with an optional project, for this Git worktree and environment. Stores no credentials or remote assets.",
+    inputSchema: {
+      repositoryRoot: z.string().min(1).describe("Absolute path inside the Git worktree that will own this local context."),
+      environment: z.enum(["staging", "production"]).optional().describe("Must match the adapter's active environment."),
+      workspaceId: z.string().optional().describe("Workspace identifier to live-verify."),
+      workspaceKey: z.string().optional().describe("Workspace key to live-verify."),
+      workspaceName: z.string().optional().describe("Workspace name to live-verify."),
+      projectId: z.string().optional().describe("Optional project identifier within the selected workspace."),
+      projectKey: z.string().optional().describe("Optional project key within the selected workspace."),
+      projectName: z.string().optional().describe("Optional project name within the selected workspace."),
+      confirmation: z.literal("CONFIRM_CONTENTTRAKER_CONTEXT").describe("Required human-confirmation literal."),
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+    },
+  },
+  async (input, extra) => {
+    const result = await confirmContentTrakerContext(input, apiClient, securityContextFactory.create(extra));
+    return {
+      content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+      structuredContent: result as unknown as Record<string, unknown>,
+    };
+  },
+);
+
+server.registerTool(
+  "reset_contenttraker_context",
+  {
+    title: "Reset ContentTraker Context",
+    description:
+      "Clear only this Git worktree's selected ContentTraker environment binding and prevent stale registry fallback. Preserves authentication, other worktrees, other environments, and all remote assets.",
+    inputSchema: {
+      repositoryRoot: z.string().min(1).describe("Absolute path inside the Git worktree whose local context will be reset."),
+      environment: z.enum(["staging", "production"]).optional().describe("Must match the adapter's active environment."),
+      confirmation: z.literal("RESET_CONTENTTRAKER_CONTEXT").describe("Required reset-confirmation literal."),
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  },
+  async (input) => {
+    const result = resetContentTrakerContext(input);
+    return {
+      content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+      structuredContent: result as unknown as Record<string, unknown>,
+    };
+  },
+);
+
+server.registerTool(
   "resolve_contenttraker_context",
   {
     title: "Resolve ContentTraker Context",
@@ -364,6 +427,7 @@ server.registerTool(
     inputSchema: {
       projectName: z.string().optional().describe("Local project or repository name."),
       workspaceId: z.string().optional().describe("Explicit ContentTraker workspace identifier."),
+      workspaceKey: z.string().optional().describe("Explicit ContentTraker workspace key."),
       workspaceName: z.string().optional().describe("Preferred ContentTraker workspace name."),
       repositoryRoot: z.string().optional().describe("Absolute local repository root path."),
     },
@@ -371,11 +435,11 @@ server.registerTool(
       readOnlyHint: true,
       destructiveHint: false,
       idempotentHint: true,
-      openWorldHint: false,
+      openWorldHint: true,
     },
   },
   async (input, extra) => {
-    const result = resolveContentTrakerContext(input, apiClient, securityContextFactory.create(extra));
+    const result = await resolveContentTrakerContext(input, apiClient, securityContextFactory.create(extra));
 
     return {
       content: [
@@ -398,6 +462,7 @@ server.registerTool(
     inputSchema: {
       projectName: z.string().optional().describe("Local project or repository name."),
       workspaceId: z.string().optional().describe("Explicit ContentTraker workspace identifier."),
+      workspaceKey: z.string().optional().describe("Explicit ContentTraker workspace key."),
       workspaceName: z.string().optional().describe("Preferred ContentTraker workspace name."),
       repositoryRoot: z.string().optional().describe("Absolute local repository root path."),
     },
@@ -432,6 +497,7 @@ server.registerTool(
     inputSchema: {
       projectName: z.string().optional().describe("Local project or repository name."),
       workspaceId: z.string().optional().describe("Explicit ContentTraker workspace identifier."),
+      workspaceKey: z.string().optional().describe("Explicit ContentTraker workspace key."),
       workspaceName: z.string().optional().describe("Preferred ContentTraker workspace name."),
       repositoryRoot: z.string().optional().describe("Absolute local repository root path."),
     },
@@ -439,11 +505,11 @@ server.registerTool(
       readOnlyHint: true,
       destructiveHint: false,
       idempotentHint: true,
-      openWorldHint: false,
+      openWorldHint: true,
     },
   },
   async (input, extra) => {
-    const result = inspectContentTrakerApiContract(input, apiClient, securityContextFactory.create(extra));
+    const result = await inspectContentTrakerApiContract(input, apiClient, securityContextFactory.create(extra));
 
     return {
       content: [
@@ -465,6 +531,7 @@ server.registerTool(
     inputSchema: {
       projectName: z.string().optional().describe("Local project or repository name used to resolve the workspace registry mapping."),
       workspaceId: z.string().optional().describe("Explicit ContentTraker workspace identifier."),
+      workspaceKey: z.string().optional().describe("Explicit ContentTraker workspace key."),
       workspaceName: z.string().optional().describe("Preferred ContentTraker workspace name used to resolve the workspace registry mapping."),
       repositoryRoot: z.string().optional().describe("Absolute local repository root path used to resolve the workspace registry mapping."),
     },
@@ -487,6 +554,7 @@ server.registerTool(
     inputSchema: {
       projectName: z.string().optional().describe("Local project or repository name used to resolve the workspace registry mapping."),
       workspaceId: z.string().optional().describe("Explicit ContentTraker workspace identifier."),
+      workspaceKey: z.string().optional().describe("Explicit ContentTraker workspace key."),
       workspaceName: z.string().optional().describe("Preferred ContentTraker workspace name used to resolve the workspace registry mapping."),
       repositoryRoot: z.string().optional().describe("Absolute local repository root path used to resolve the workspace registry mapping."),
       digitalAssetId: z.string().min(1).describe("Digital asset ID."),
@@ -519,6 +587,7 @@ server.registerTool(
     inputSchema: {
       projectName: z.string().optional().describe("Local project or repository name used to resolve the workspace registry mapping."),
       workspaceId: z.string().optional().describe("Explicit ContentTraker workspace identifier."),
+      workspaceKey: z.string().optional().describe("Explicit ContentTraker workspace key."),
       workspaceName: z.string().optional().describe("Preferred ContentTraker workspace name used to resolve the workspace registry mapping."),
       repositoryRoot: z.string().optional().describe("Absolute local repository root path used to resolve the workspace registry mapping."),
       query: z.string().optional().describe("Search text. Empty returns the newest matching assets."),
@@ -555,6 +624,7 @@ server.registerTool(
     inputSchema: {
       projectName: z.string().optional().describe("Local project or repository name used only to resolve the workspace registry mapping."),
       workspaceId: z.string().optional().describe("Explicit ContentTraker workspace identifier."),
+      workspaceKey: z.string().optional().describe("Explicit ContentTraker workspace key."),
       workspaceName: z.string().optional().describe("Preferred ContentTraker workspace name used only to resolve the workspace registry mapping."),
       repositoryRoot: z.string().optional().describe("Absolute local repository root path used only to resolve the workspace registry mapping."),
       title: z.string().min(1).describe("Digital asset title."),
@@ -605,6 +675,7 @@ server.registerTool(
     inputSchema: {
       projectName: z.string().optional(),
       workspaceId: z.string().optional(),
+      workspaceKey: z.string().optional(),
       workspaceName: z.string().optional(),
       repositoryRoot: z.string().optional(),
       title: z.string().min(1),
@@ -640,6 +711,7 @@ server.registerTool(
     inputSchema: {
       projectName: z.string().optional(),
       workspaceId: z.string().optional(),
+      workspaceKey: z.string().optional(),
       workspaceName: z.string().optional(),
       repositoryRoot: z.string().optional(),
       uploadSessionId: z.string().min(1),
@@ -672,6 +744,7 @@ server.registerTool(
     inputSchema: {
       projectName: z.string().optional(),
       workspaceId: z.string().optional(),
+      workspaceKey: z.string().optional(),
       workspaceName: z.string().optional(),
       repositoryRoot: z.string().optional(),
       uploadSessionId: z.string().min(1),
@@ -712,6 +785,7 @@ server.registerTool(
     inputSchema: {
       projectName: z.string().optional().describe("Local project or repository name used to resolve the workspace registry mapping."),
       workspaceId: z.string().optional().describe("Explicit ContentTraker workspace identifier."),
+      workspaceKey: z.string().optional().describe("Explicit ContentTraker workspace key."),
       workspaceName: z.string().optional().describe("Preferred ContentTraker workspace name used to resolve the workspace registry mapping."),
       repositoryRoot: z.string().optional().describe("Absolute local repository root path used to resolve the workspace registry mapping."),
       digitalAssetId: z.string().min(1).describe("Digital asset ID."),
@@ -743,6 +817,7 @@ server.registerTool(
     inputSchema: {
       projectName: z.string().optional().describe("Local project or repository name used to resolve the workspace registry mapping."),
       workspaceId: z.string().optional().describe("Explicit ContentTraker workspace identifier."),
+      workspaceKey: z.string().optional().describe("Explicit ContentTraker workspace key."),
       workspaceName: z.string().optional().describe("Preferred ContentTraker workspace name used to resolve the workspace registry mapping."),
       repositoryRoot: z.string().optional().describe("Absolute local repository root path used to resolve the workspace registry mapping."),
       digitalAssetId: z.string().min(1).describe("Digital asset ID returned by create_digital_asset or ContentTraker."),

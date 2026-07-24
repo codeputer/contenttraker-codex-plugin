@@ -103,6 +103,9 @@ export type ContextResolutionStatus =
   | "resolved"
   | "defaulted"
   | "workspace_conflict"
+  | "blocked"
+  | "failed"
+  | "reset"
   | "unconfigured"
   | "unresolved";
 
@@ -177,9 +180,16 @@ export interface ContentTrakerContext {
   environment?: ContentTrakerEnvironment;
   workspaceName?: string;
   workspaceId?: string;
+  workspaceKey?: string;
   projectName?: string;
   projectId?: string;
-  source: "explicit-workspace" | "registry-project" | "registry-default" | "workspace-conflict";
+  projectKey?: string;
+  source:
+    | "explicit-workspace"
+    | "worktree-marker"
+    | "registry-project"
+    | "registry-default"
+    | "workspace-conflict";
   workspaceConflict?: {
     explicit: WorkspaceCandidate;
     registry: WorkspaceCandidate;
@@ -195,8 +205,112 @@ export interface WorkspaceCandidate {
 export interface ResolveContextInput {
   projectName?: string;
   workspaceId?: string;
+  workspaceKey?: string;
   workspaceName?: string;
   repositoryRoot?: string;
+}
+
+export interface RepositoryWorktreeIdentity {
+  repositoryRoot: string;
+  repositoryIdentity: string;
+  worktreeId: string;
+  gitDirectory: string;
+  gitCommonDirectory: string;
+  excludePath: string;
+}
+
+export interface WorktreeContextBinding {
+  environment: ContentTrakerEnvironment;
+  repositoryIdentity: string;
+  worktreeId: string;
+  workspaceId: string;
+  workspaceKey?: string;
+  workspaceName?: string;
+  projectId?: string;
+  projectKey?: string;
+  projectName?: string;
+  confirmationState: "human-confirmed";
+  confirmedAtUtc: string;
+  pluginName: string;
+  pluginVersion: string;
+}
+
+export interface WorktreeContextReset {
+  environment: ContentTrakerEnvironment;
+  repositoryIdentity: string;
+  worktreeId: string;
+  resetAtUtc: string;
+}
+
+export interface WorktreeContextDocument {
+  schemaVersion: 1;
+  contexts: Partial<Record<ContentTrakerEnvironment, WorktreeContextBinding>>;
+  resets: Partial<Record<ContentTrakerEnvironment, WorktreeContextReset>>;
+}
+
+export interface WorktreeContextSnapshot {
+  path: string;
+  exists: boolean;
+  loaded: boolean;
+  binding?: WorktreeContextBinding;
+  reset?: WorktreeContextReset;
+  blocked: boolean;
+  diagnostics: string[];
+  document?: WorktreeContextDocument;
+}
+
+export interface AuthorizedContextResolutionResult {
+  status: "ready" | "blocked" | "failed";
+  selectedContext?: ContentTrakerContext;
+  correlationIds: string[];
+  diagnostics: string[];
+}
+
+export interface ConfirmContentTrakerContextInput {
+  repositoryRoot: string;
+  environment?: ContentTrakerEnvironment;
+  workspaceId?: string;
+  workspaceKey?: string;
+  workspaceName?: string;
+  projectId?: string;
+  projectKey?: string;
+  projectName?: string;
+  confirmation: string;
+}
+
+export interface ConfirmContentTrakerContextResult {
+  status: "confirmed" | "blocked" | "failed";
+  environment?: ContentTrakerEnvironment;
+  markerPath?: string;
+  repository?: Pick<RepositoryWorktreeIdentity, "repositoryRoot" | "repositoryIdentity" | "worktreeId">;
+  selectedContext?: ContentTrakerContext;
+  correlationIds: string[];
+  diagnostics: string[];
+}
+
+export interface ResetContentTrakerContextInput {
+  repositoryRoot: string;
+  environment?: ContentTrakerEnvironment;
+  confirmation: string;
+}
+
+export interface ResetContentTrakerContextResult {
+  status: "reset" | "unchanged" | "blocked" | "failed";
+  environment?: ContentTrakerEnvironment;
+  markerPath?: string;
+  repository?: Pick<RepositoryWorktreeIdentity, "repositoryRoot" | "repositoryIdentity" | "worktreeId">;
+  cleared: {
+    markerBinding: boolean;
+    registryMappings: number;
+  };
+  resetTombstoneCreated: boolean;
+  preserved: {
+    oauthAndKeyringCredentials: true;
+    otherWorktrees: true;
+    otherEnvironments: boolean;
+    remoteContentTrakerAssets: true;
+  };
+  diagnostics: string[];
 }
 
 export interface ProbeApiReadinessInput extends ResolveContextInput {}
@@ -394,6 +508,7 @@ export interface ApiContractResult {
   status: "ready" | "blocked" | "gaps-found";
   api: ApiClientStatus;
   selectedContext?: ContentTrakerContext;
+  contextCorrelationIds?: string[];
   capabilities: ApiCapabilityCheck[];
   diagnostics: string[];
 }
@@ -402,6 +517,7 @@ export interface CreateDigitalAssetResult {
   status: "created" | "idempotent-replay" | "blocked" | "failed";
   api: ApiClientStatus;
   selectedContext?: ContentTrakerContext;
+  contextCorrelationIds?: string[];
   asset?: {
     digitalAssetId?: string;
     workspaceId?: string;
@@ -426,6 +542,7 @@ export interface SetDigitalAssetStatusResult {
   status: "changed" | "unchanged" | "blocked" | "failed";
   api: ApiClientStatus;
   selectedContext?: ContentTrakerContext;
+  contextCorrelationIds?: string[];
   asset?: {
     digitalAssetId?: string;
     workspaceId?: string;
@@ -447,6 +564,7 @@ export interface GetDigitalAssetResult {
   status: "found" | "blocked" | "failed";
   api: ApiClientStatus;
   selectedContext?: ContentTrakerContext;
+  contextCorrelationIds?: string[];
   asset?: Record<string, unknown>;
   httpStatus?: number;
   diagnostics: string[];
@@ -456,6 +574,7 @@ export interface SearchDigitalAssetsResult {
   status: "ready" | "blocked" | "failed";
   api: ApiClientStatus;
   selectedContext?: ContentTrakerContext;
+  contextCorrelationIds?: string[];
   workspaceId?: string;
   workspaceKey?: string;
   defaultStatus?: string;
@@ -469,6 +588,7 @@ export interface ListDigitalAssetTypesResult {
   status: "ready" | "blocked" | "failed";
   api: ApiClientStatus;
   selectedContext?: ContentTrakerContext;
+  contextCorrelationIds?: string[];
   workspaceId?: string;
   workspaceKey?: string;
   digitalAssetTypes: Array<Record<string, unknown>>;
@@ -481,6 +601,7 @@ export interface UpdateDigitalAssetResult {
   status: "updated" | "blocked" | "failed";
   api: ApiClientStatus;
   selectedContext?: ContentTrakerContext;
+  contextCorrelationIds?: string[];
   asset?: Record<string, unknown>;
   httpStatus?: number;
   diagnostics: string[];
@@ -490,6 +611,7 @@ export interface DigitalAssetUploadResult {
   status: "ready" | "staged" | "completed" | "blocked" | "failed";
   api: ApiClientStatus;
   selectedContext?: ContentTrakerContext;
+  contextCorrelationIds?: string[];
   upload?: Record<string, unknown>;
   httpStatus?: number;
   diagnostics: string[];
@@ -515,6 +637,7 @@ export interface ApiReadinessResult {
   status: ApiReadinessStatus;
   api: ApiClientStatus;
   selectedContext?: ContentTrakerContext;
+  contextCorrelationIds?: string[];
   checks: ApiReadinessCheck[];
   diagnostics: string[];
 }
@@ -535,6 +658,15 @@ export interface ResolveContextResult {
     documentVersion?: WorkspaceRegistryDocument["version"];
     projectCount: number;
   };
+  worktree?: {
+    path: string;
+    exists: boolean;
+    loaded: boolean;
+    bindingFound: boolean;
+    resetActive: boolean;
+    blocked: boolean;
+  };
+  correlationIds?: string[];
   api: ApiClientStatus;
   diagnostics: string[];
 }
@@ -550,5 +682,14 @@ export interface RegistryUpsertResult {
     projectCount: number;
   };
   selectedContext: ContentTrakerContext;
+  diagnostics: string[];
+}
+
+export interface RegistryMappingRemovalResult {
+  path: string;
+  environment: ContentTrakerEnvironment;
+  loaded: boolean;
+  removedCount: number;
+  remainingProjectCount: number;
   diagnostics: string[];
 }

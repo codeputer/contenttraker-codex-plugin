@@ -39,6 +39,7 @@ const seenUploadBodies = [];
 
 const apiServer = https.createServer({ key: testCertificate.private, cert: testCertificate.cert }, (request, response) => {
   seenAuthorizationHeaders.push(request.headers.authorization);
+  const requestUrl = new URL(request.url ?? "/", "https://contenttraker.test");
 
   response.setHeader("content-type", "application/json");
   response.setHeader("connection", "close");
@@ -82,10 +83,15 @@ const apiServer = https.createServer({ key: testCertificate.private, cert: testC
     return;
   }
 
-  if (request.method === "GET" && request.url === "/workspaces/workspace-staging/digital-assets/asset-staging") {
+  if (
+    request.method === "GET"
+    && requestUrl.pathname === "/workspaces/workspace-staging/digital-assets/asset-staging"
+  ) {
+    assert.equal(requestUrl.searchParams.get("projectId"), "project-staging");
     response.end(JSON.stringify({
       digitalAssetId: "asset-staging",
       workspaceId: "workspace-staging",
+      projectId: "project-staging",
       title: "Workspace-level Codex test asset",
       status: "draft",
       version: 1,
@@ -94,7 +100,12 @@ const apiServer = https.createServer({ key: testCertificate.private, cert: testC
     return;
   }
 
-  if (request.method === "GET" && request.url?.startsWith("/workspaces/workspace-staging/digital-assets?")) {
+  if (
+    request.method === "GET"
+    && requestUrl.pathname === "/workspaces/workspace-staging/digital-assets"
+  ) {
+    assert.equal(requestUrl.searchParams.get("projectId"), "project-staging");
+    assert.equal(requestUrl.searchParams.get("status"), "draft");
     response.end(JSON.stringify({
       workspaceId: "workspace-staging",
       workspaceKey: "workspace-staging",
@@ -452,7 +463,9 @@ try {
     arguments: { projectName: "sample-project", repositoryRoot, digitalAssetId: "asset-staging" },
   });
   assert.equal(assetRead.status, "found");
+  assert.equal(assetRead.selectedContext.projectId, "project-staging");
   assert.equal(assetRead.asset.status, "draft");
+  assert.equal(assetRead.asset.projectId, "project-staging");
 
   const assetSearch = await callTool({
     name: "search_digital_assets",
@@ -464,6 +477,7 @@ try {
     arguments: { projectName: "sample-project", repositoryRoot, query: "", status: "draft" },
   });
   assert.equal(assetSearch.status, "ready");
+  assert.equal(assetSearch.selectedContext.projectId, "project-staging");
   assert.equal(assetSearch.results[0].status, "draft");
 
   const write = await callTool({
@@ -489,9 +503,9 @@ try {
   assert.equal(write.selectedContext.workspaceId, "workspace-staging");
   assert.equal(write.selectedContext.projectId, "project-staging");
   assert.equal(write.asset.workspaceId, "workspace-staging");
-  assert.equal(write.asset.projectId, undefined);
+  assert.equal(write.asset.projectId, "project-staging");
   assert.equal(seenWriteBodies.length, 1);
-  assert.equal(seenWriteBodies[0].projectId, undefined);
+  assert.equal(seenWriteBodies[0].projectId, "project-staging");
   assert.equal(seenWriteBodies[0].sourceSystem, "codex");
   assert.equal(seenWriteBodies[0].idempotencyKey, "smoke-write-001");
   assert.equal(seenWriteBodies[0].status, "published");
@@ -731,6 +745,8 @@ async function verifyProductionBundleStarts() {
   const responses = result.stdout.split(/\r?\n/u).filter(Boolean).map((line) => JSON.parse(line));
   assert.equal(responses.length, 2);
   assert.equal(responses[1].result.tools.some((tool) => tool.name === "inspect_runtime_capabilities"), true);
+  assert.equal(responses[1].result.tools.some((tool) => tool.name === "confirm_contenttraker_context"), true);
+  assert.equal(responses[1].result.tools.some((tool) => tool.name === "reset_contenttraker_context"), true);
 }
 
 async function callTool({ name, env, arguments: toolArguments }) {
@@ -795,6 +811,8 @@ async function callTool({ name, env, arguments: toolArguments }) {
     tools.some((tool) => tool.name === "resolve_contenttraker_context"),
     true,
   );
+  assert.equal(tools.some((tool) => tool.name === "confirm_contenttraker_context"), true);
+  assert.equal(tools.some((tool) => tool.name === "reset_contenttraker_context"), true);
   assert.equal(tools.some((tool) => tool.name === "inspect_runtime_capabilities"), true);
   assert.equal(tools.some((tool) => tool.name === "inspect_contenttraker_oauth_metadata"), true);
   assert.equal(tools.some((tool) => tool.name === "begin_contenttraker_authorization"), true);

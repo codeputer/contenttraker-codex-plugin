@@ -28,7 +28,26 @@ The marketplace manifest fixes only the safe ContentTraker target default, `stag
 
 Business API tools never initiate interactive authorization. Call `begin_contenttraker_login` and `poll_contenttraker_login`; `get_current_user` returns `authentication_required` when no credential can be restored.
 
-Workspace context has a separate fail-closed precedence: explicit `workspaceId`, explicit `workspaceName`, exact repository/project registry mapping, then environment default. When an explicit candidate differs from the exact registry mapping, the result is `workspace_conflict`; both candidates are reported and neither is selected. The caller must choose a workspace and update the local registry through `upsert_contenttraker_registry_mapping` only when that separate local change is intended.
+Workspace context has a separate fail-closed precedence:
+
+1. explicit per-call `workspaceId`, `workspaceKey`, or `workspaceName`;
+2. a live-authorized, human-confirmed marker for the current Git worktree and environment;
+3. an exact environment-scoped registry mapping when the worktree has not been explicitly reset;
+4. live resolution and the smallest necessary human confirmation.
+
+An explicit per-call selector intentionally wins over the marker. Without an explicit selector, the absolute `repositoryRoot` is required because the adapter process runs from the installed plugin directory. A missing root or an invalid, copied, stale, unauthorized, or malformed marker blocks fallback instead of silently selecting a registry/default workspace.
+
+## Durable worktree selection
+
+Use `$contenttraker-select` or ask plainly to select the ContentTraker context. The skill verifies the effective caller and exact live workspace/project before calling `confirm_contenttraker_context`. That tool requires the literal confirmation `CONFIRM_CONTENTTRAKER_CONTEXT` and writes `.contenttraker-codex/context.json` only after the user's exact choice is confirmed.
+
+The versioned file keeps separate `staging` and `production` entries. Each binding records the normalized repository identity, a worktree fingerprint, stable workspace identifiers and names, optional project provenance, confirmation timestamp, and plugin provenance. It never stores a token, refresh credential, authorization code, cookie, keyring value, password, secret, or remote asset content.
+
+The marker is automatically added to Git's private worktree-safe `info/exclude` rules, including its atomic temporary files. The plugin does not edit the tracked `.gitignore`, and it refuses to use a marker path that is already tracked.
+
+Use `$contenttraker-reset` or ask plainly to reset the current worktree's ContentTraker context. `reset_contenttraker_context` requires `RESET_CONTENTTRAKER_CONTEXT`, clears only the active environment's binding and exact matching registry entries, and adds a reset tombstone. The tombstone prevents an environment default from undoing the reset before a new live selection is confirmed. Authentication, other worktrees, valid other-environment marker entries, and remote assets are preserved. If the marker is wholly unreadable or untrusted, the result explicitly says that another environment entry could not be safely preserved instead of claiming otherwise.
+
+Native `/contenttraker-select` and `/contenttraker-reset` aliases are not supported by the current plugin contract.
 
 Non-container user hosts select delegated OAuth by default. Containers and CI select workload OAuth and currently stop at the workload layer because staging advertises no supported workload grant and the plugin has no host workload provider. For an intentionally interactive one-off container, set both `CONTENTTRAKER_AUTH_MODE=delegated` and `CONTENTTRAKER_CREDENTIAL_STORE=memory`; the authorization disappears with the process.
 
