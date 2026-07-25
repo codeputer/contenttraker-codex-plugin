@@ -5,6 +5,17 @@ import path from "node:path";
 import { resolveBrowserInteraction } from "./browser-interaction.js";
 import { resolveCredentialStore } from "./credential-store.js";
 import { resolveAdapterEnvironment } from "./environment-profile.js";
+import { inspectContentTrakerIdentityPolicy } from "./identity-policy.js";
+import {
+  CONTENTTRAKER_CODEX_TRANSPORT,
+  CONTENTTRAKER_HOST_BOUNDARY,
+  CONTENTTRAKER_MCP_REGISTRATION_KEY,
+  CONTENTTRAKER_PLUGIN_ID,
+  CONTENTTRAKER_PLUGIN_NAME,
+  CONTENTTRAKER_PLUGIN_VERSION,
+  CONTENTTRAKER_BUNDLES_REMOTE_APP_MAPPING,
+  CONTENTTRAKER_UPSTREAM_INTERFACE,
+} from "./plugin-metadata.js";
 import type {
   RuntimeCapabilitiesResult,
   RuntimeCapability,
@@ -35,6 +46,7 @@ export function inspectRuntimeCapabilities(
   host: RuntimeHostFacts = detectRuntimeHostFacts(env),
 ): RuntimeCapabilitiesResult {
   const environmentProfile = resolveAdapterEnvironment(env);
+  const identityPolicy = inspectContentTrakerIdentityPolicy(env);
   const configuredProfile = env.CONTENTTRAKER_RUNTIME_PROFILE?.trim().toLowerCase() || "auto";
   const configuredCredentialProfile = env.CONTENTTRAKER_CREDENTIAL_PROFILE?.trim() || "default";
   const validCredentialProfile = /^[a-z0-9][a-z0-9._-]{0,63}$/iu.test(configuredCredentialProfile);
@@ -62,6 +74,8 @@ export function inspectRuntimeCapabilities(
       "CONTENTTRAKER_CREDENTIAL_PROFILE must be 1-64 letters, numbers, dots, underscores, or hyphens.",
     );
   }
+
+  diagnostics.push(...identityPolicy.diagnostics);
 
   if (selectedProfile) {
     diagnostics.push(...validateExplicitProfile(configuredProfile, selectedProfile, host));
@@ -216,6 +230,7 @@ export function inspectRuntimeCapabilities(
   const invalid = !validRequestedProfile
     || !environmentProfile.status.valid
     || !validCredentialProfile
+    || !identityPolicy.valid
     || !validAuthMode
     || !validDelegatedFlow
     || diagnostics.some((entry) => entry.startsWith("Explicit runtime profile"));
@@ -223,6 +238,22 @@ export function inspectRuntimeCapabilities(
 
   return {
     status: invalid ? "invalid" : ready ? "ready" : "blocked",
+    adapterIdentity: {
+      pluginId: CONTENTTRAKER_PLUGIN_ID,
+      pluginName: CONTENTTRAKER_PLUGIN_NAME,
+      pluginVersion: CONTENTTRAKER_PLUGIN_VERSION,
+      mcpRegistrationKey: CONTENTTRAKER_MCP_REGISTRATION_KEY,
+      hostBoundary: CONTENTTRAKER_HOST_BOUNDARY,
+      codexTransport: CONTENTTRAKER_CODEX_TRANSPORT,
+      upstreamInterface: CONTENTTRAKER_UPSTREAM_INTERFACE,
+      bundlesRemoteAppMapping: CONTENTTRAKER_BUNDLES_REMOTE_APP_MAPPING,
+    },
+    identityPolicy: {
+      required: identityPolicy.required,
+      valid: identityPolicy.valid,
+      requiredUserEmailConfigured: identityPolicy.requiredUserEmailConfigured,
+      namedCredentialProfileConfigured: identityPolicy.namedCredentialProfileConfigured,
+    },
     contentTrakerEnvironment: {
       requestedName: environmentProfile.status.requestedName,
       name: environmentProfile.status.name,

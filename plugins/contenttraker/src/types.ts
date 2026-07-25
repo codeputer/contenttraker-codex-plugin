@@ -57,6 +57,22 @@ export interface RuntimeStrategySelection {
 
 export interface RuntimeCapabilitiesResult {
   status: "ready" | "blocked" | "invalid";
+  adapterIdentity: {
+    pluginId: string;
+    pluginName: string;
+    pluginVersion: string;
+    mcpRegistrationKey: string;
+    hostBoundary: "local-codex-plugin";
+    codexTransport: "stdio";
+    upstreamInterface: "contenttraker-https-json-api";
+    bundlesRemoteAppMapping: false;
+  };
+  identityPolicy: {
+    required: boolean;
+    valid: boolean;
+    requiredUserEmailConfigured: boolean;
+    namedCredentialProfileConfigured: boolean;
+  };
   contentTrakerEnvironment: {
     requestedName: string;
     name?: ContentTrakerEnvironment;

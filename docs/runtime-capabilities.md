@@ -7,7 +7,7 @@ The ContentTraker target environment and the plugin host runtime are independent
 - `CONTENTTRAKER_AUTH_MODE` selects `auto`, `delegated`, or `workload` and defaults to `auto`.
 - `CONTENTTRAKER_DELEGATED_FLOW` selects `auto`, `authorization-code`, or `device-code` and defaults to `auto`.
 - `CONTENTTRAKER_CREDENTIAL_STORE` selects `auto`, `windows-credential-manager`, `macos-keychain`, `linux-secret-service`, or `memory`.
-- `CONTENTTRAKER_CREDENTIAL_PROFILE` selects the durable delegated-user profile and defaults to `default`; the stable binding also includes normalized `CONTENTTRAKER_REQUIRED_USER_EMAIL`.
+- `CONTENTTRAKER_CREDENTIAL_PROFILE` selects the durable delegated-user profile; the packaged plugin requires a named profile and normalized `CONTENTTRAKER_REQUIRED_USER_EMAIL`.
 
 The runtime profile defaults to `auto`. Valid values are:
 
@@ -29,6 +29,8 @@ Host capability inspection is intentionally offline. Call `inspect_contenttraker
 
 The result reports only non-secret facts:
 
+- the local plugin ID/version, `contenttraker-codex-adapter` registration, stdio transport, HTTPS JSON API upstream, and the package-scoped fact that this plugin does not bundle a remote app mapping;
+- whether the required-email and named-profile identity policy is configured, without returning the email;
 - requested and selected runtime and authentication profiles;
 - the independently selected ContentTraker environment;
 - platform, WSL, container, CI, display, D-Bus, browser-launcher, and secure-store prerequisite facts;

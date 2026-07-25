@@ -70,6 +70,8 @@ const expectedToolNames = [
 ];
 
 assert.equal(pluginDocument.version, packageDocument.version);
+assert.equal(packageLockDocument.version, packageDocument.version);
+assert.equal(packageLockDocument.packages?.[""]?.version, packageDocument.version);
 assert.ok(
   Array.isArray(pluginDocument.interface?.defaultPrompt)
     && pluginDocument.interface.defaultPrompt.length > 0
@@ -95,8 +97,21 @@ assert.deepEqual(mcpDocument.mcpServers["contenttraker-codex-adapter"], {
   cwd: ".",
   command: "node",
   args: ["./dist/server.mjs"],
-  env: { CONTENTTRAKER_ENVIRONMENT: "staging" },
+  env: { CONTENTTRAKER_REQUIRE_IDENTITY_POLICY: "true" },
+  env_vars: [
+    "CONTENTTRAKER_ENVIRONMENT",
+    "CONTENTTRAKER_RUNTIME_PROFILE",
+    "CONTENTTRAKER_AUTH_MODE",
+    "CONTENTTRAKER_DELEGATED_FLOW",
+    "CONTENTTRAKER_BROWSER_MODE",
+    "CONTENTTRAKER_CREDENTIAL_STORE",
+    "CONTENTTRAKER_CREDENTIAL_PROFILE",
+    "CONTENTTRAKER_REQUIRED_USER_EMAIL",
+    "CONTENTTRAKER_ALLOW_EPHEMERAL_PRODUCTION",
+    "CONTENTTRAKER_ENABLE_PRODUCTION_WRITES",
+  ],
 });
+assert.equal("url" in mcpDocument.mcpServers["contenttraker-codex-adapter"], false);
 assert.deepEqual(packageDocument.dependencies ?? {}, {});
 for (const relativePath of packagedSkillPaths) {
   const skillPath = path.join(pluginRoot, relativePath);
@@ -354,6 +369,22 @@ async function verifyExtractedMarketplaceArtifact() {
     const capabilities = responses[2].result.structuredContent;
     assert.equal(typeof capabilities, "object");
     assertRuntimeStatus(capabilities);
+    assert.deepEqual(capabilities.adapterIdentity, {
+      pluginId: "contenttraker@contenttraker",
+      pluginName: "contenttraker",
+      pluginVersion: packageDocument.version,
+      mcpRegistrationKey: "contenttraker-codex-adapter",
+      hostBoundary: "local-codex-plugin",
+      codexTransport: "stdio",
+      upstreamInterface: "contenttraker-https-json-api",
+      bundlesRemoteAppMapping: false,
+    });
+    assert.deepEqual(capabilities.identityPolicy, {
+      required: true,
+      valid: true,
+      requiredUserEmailConfigured: true,
+      namedCredentialProfileConfigured: true,
+    });
     assert.equal(capabilities.contentTrakerEnvironment.name, "staging");
   } finally {
     fs.rmSync(extractedRoot, { recursive: true, force: true });
@@ -408,7 +439,12 @@ function runConfiguredAdapter(adapter, extractedPluginRoot, requests) {
   assert.equal(Array.isArray(adapter.args), true);
   const adapterWorkingDirectory = path.resolve(extractedPluginRoot, adapter.cwd);
   return new Promise((resolve, reject) => {
-    const env = { ...process.env, ...adapter.env };
+    const env = {
+      ...process.env,
+      CONTENTTRAKER_CREDENTIAL_PROFILE: "release-artifact",
+      CONTENTTRAKER_REQUIRED_USER_EMAIL: "release-artifact@example.invalid",
+      ...adapter.env,
+    };
     delete env.CONTENTTRAKER_AUTH_MODE;
     delete env.CONTENTTRAKER_RUNTIME_PROFILE;
     delete env.CONTENTTRAKER_INTERNAL_TEST_ADAPTER;

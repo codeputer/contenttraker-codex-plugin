@@ -50,6 +50,11 @@ const isolatedCodexHome = path.join(smokeRoot, "codex-home");
 const codexEnvironment = {
   ...process.env,
   CODEX_HOME: isolatedCodexHome,
+  CONTENTTRAKER_CREDENTIAL_PROFILE: "codex-install-smoke",
+  CONTENTTRAKER_REQUIRED_USER_EMAIL: "codex-install-smoke@example.invalid",
+  ...(process.env.CONTENTTRAKER_EXPECT_RUNTIME_STATUS?.trim() === "blocked"
+    ? { CONTENTTRAKER_AUTH_MODE: "workload" }
+    : {}),
 };
 let pluginInstalled = false;
 let marketplaceInstalled = false;
@@ -99,13 +104,29 @@ try {
     false,
     "Codex installed node_modules even though the reviewed marketplace artifact excludes it.",
   );
+  const installedPluginDocument = readJson(path.join(installedRoot, ".codex-plugin", "plugin.json"));
+  const installedPackageDocument = readJson(path.join(installedRoot, "package.json"));
+  assert.equal(installedPluginDocument.version, packageDocument.version);
+  assert.equal(installedPackageDocument.version, packageDocument.version);
   const mcpDocument = readJson(path.join(installedRoot, ".mcp.json"));
   const adapter = mcpDocument.mcpServers?.["contenttraker-codex-adapter"];
   assert.deepEqual(adapter, {
     cwd: ".",
     command: "node",
     args: ["./dist/server.mjs"],
-    env: { CONTENTTRAKER_ENVIRONMENT: "staging" },
+    env: { CONTENTTRAKER_REQUIRE_IDENTITY_POLICY: "true" },
+    env_vars: [
+      "CONTENTTRAKER_ENVIRONMENT",
+      "CONTENTTRAKER_RUNTIME_PROFILE",
+      "CONTENTTRAKER_AUTH_MODE",
+      "CONTENTTRAKER_DELEGATED_FLOW",
+      "CONTENTTRAKER_BROWSER_MODE",
+      "CONTENTTRAKER_CREDENTIAL_STORE",
+      "CONTENTTRAKER_CREDENTIAL_PROFILE",
+      "CONTENTTRAKER_REQUIRED_USER_EMAIL",
+      "CONTENTTRAKER_ALLOW_EPHEMERAL_PRODUCTION",
+      "CONTENTTRAKER_ENABLE_PRODUCTION_WRITES",
+    ],
   });
 
   const responses = await runConfiguredAdapter(adapter, installedRoot);
@@ -118,9 +139,21 @@ try {
   const runtime = responses[2].result.structuredContent;
   assert.equal(typeof runtime, "object");
   assertRuntimeStatus(runtime);
+  assertAdapterIdentity(runtime);
+
+  const codexHostedRuntime = await runCodexHostedRuntimeDiagnostic();
+  assertRuntimeStatus(codexHostedRuntime);
+  assertAdapterIdentity(codexHostedRuntime);
+  assert.equal(codexHostedRuntime.selectedStrategy.credentialProfile, "codex-install-smoke");
+  assert.deepEqual(codexHostedRuntime.identityPolicy, {
+    required: true,
+    valid: true,
+    requiredUserEmailConfigured: true,
+    namedCredentialProfileConfigured: true,
+  });
 
   console.log(
-    `Codex installed ${pluginId} ${packageDocument.version} and exposed ${expectedToolNames.length} adapter tools.`,
+    `Codex installed ${pluginId} ${packageDocument.version}, launched the local adapter, forwarded the host identity policy, and exposed ${expectedToolNames.length} tools.`,
   );
 } finally {
   if (pluginInstalled) {
@@ -239,7 +272,7 @@ function runConfiguredAdapter(adapter, installedRoot) {
   return new Promise((resolve, reject) => {
     const child = spawn(adapter.command, adapter.args, {
       cwd: path.resolve(installedRoot, adapter.cwd),
-      env: { ...process.env, ...adapter.env },
+      env: { ...codexEnvironment, ...adapter.env },
       stdio: ["pipe", "pipe", "pipe"],
     });
     let stdout = "";
@@ -284,4 +317,155 @@ function assertRuntimeStatus(runtime) {
     return;
   }
   assert.equal(["ready", "blocked"].includes(runtime.status), true);
+}
+
+function assertAdapterIdentity(runtime) {
+  assert.deepEqual(runtime.adapterIdentity, {
+    pluginId: "contenttraker@contenttraker",
+    pluginName: "contenttraker",
+    pluginVersion: packageDocument.version,
+    mcpRegistrationKey: "contenttraker-codex-adapter",
+    hostBoundary: "local-codex-plugin",
+    codexTransport: "stdio",
+    upstreamInterface: "contenttraker-https-json-api",
+    bundlesRemoteAppMapping: false,
+  });
+}
+
+async function runCodexHostedRuntimeDiagnostic() {
+  const client = createCodexAppServerClient();
+  try {
+    await client.request("initialize", {
+      clientInfo: { name: "contenttraker-codex-install-smoke", version: "1.0.0" },
+      capabilities: { experimentalApi: true },
+    });
+    client.notify("initialized", {});
+    const started = await client.request("thread/start", {
+      cwd: repositoryRoot,
+      ephemeral: true,
+    });
+    const threadId = started.thread.id;
+    const inventory = await client.request("mcpServerStatus/list", { threadId });
+    const adapter = inventory.data.find(
+      (server) => Object.hasOwn(server.tools, "inspect_runtime_capabilities"),
+    );
+    assert.ok(adapter, "Codex did not launch the installed ContentTraker MCP adapter.");
+    assert.equal(adapter.serverInfo?.version, packageDocument.version);
+    assert.deepEqual(
+      Object.keys(adapter.tools).sort(),
+      [...expectedToolNames].sort(),
+      "Codex did not expose exactly the expected installed ContentTraker tools.",
+    );
+    const result = await client.request("mcpServer/tool/call", {
+      threadId,
+      server: adapter.name,
+      tool: "inspect_runtime_capabilities",
+      arguments: {},
+    });
+    assert.equal(result.isError ?? false, false);
+    assert.equal(typeof result.structuredContent, "object");
+    return result.structuredContent;
+  } finally {
+    await client.close();
+  }
+}
+
+function createCodexAppServerClient() {
+  const child = spawn(process.execPath, [codexLauncher, "app-server", "--stdio"], {
+    cwd: repositoryRoot,
+    env: codexEnvironment,
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  const pending = new Map();
+  let nextId = 1;
+  let stdoutBuffer = "";
+  let stderr = "";
+  let closed = false;
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", (chunk) => {
+    stdoutBuffer += chunk;
+    for (;;) {
+      const newline = stdoutBuffer.indexOf("\n");
+      if (newline < 0) break;
+      const line = stdoutBuffer.slice(0, newline).trim();
+      stdoutBuffer = stdoutBuffer.slice(newline + 1);
+      if (!line) continue;
+      let message;
+      try {
+        message = JSON.parse(line);
+      } catch (error) {
+        rejectAll(new Error(`Codex app-server returned invalid JSON: ${line}`, { cause: error }));
+        continue;
+      }
+      if (message.id === undefined) continue;
+      const flight = pending.get(message.id);
+      if (!flight) continue;
+      pending.delete(message.id);
+      if (message.error) {
+        flight.reject(new Error(`Codex app-server ${flight.method} failed: ${JSON.stringify(message.error)}`));
+      } else {
+        flight.resolve(message.result);
+      }
+    }
+  });
+  child.stderr.on("data", (chunk) => { stderr += chunk; });
+  child.on("error", (error) => rejectAll(error));
+  child.on("close", (status, signal) => {
+    closed = true;
+    if (pending.size > 0) {
+      rejectAll(new Error(
+        stderr || `Codex app-server exited with status ${status ?? "none"} and signal ${signal ?? "none"}.`,
+      ));
+    }
+  });
+
+  function rejectAll(error) {
+    for (const flight of pending.values()) {
+      flight.reject(error);
+    }
+    pending.clear();
+  }
+
+  return {
+    request(method, params) {
+      const id = nextId;
+      nextId += 1;
+      return new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          pending.delete(id);
+          reject(new Error(`Codex app-server ${method} timed out. ${stderr}`));
+        }, 30_000);
+        pending.set(id, {
+          method,
+          resolve: (value) => {
+            clearTimeout(timeout);
+            resolve(value);
+          },
+          reject: (error) => {
+            clearTimeout(timeout);
+            reject(error);
+          },
+        });
+        child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
+      });
+    },
+    notify(method, params) {
+      child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method, params })}\n`);
+    },
+    close() {
+      if (closed) return Promise.resolve();
+      return new Promise((resolve) => {
+        const timeout = setTimeout(() => {
+          child.kill();
+          resolve();
+        }, 5_000);
+        child.once("close", () => {
+          clearTimeout(timeout);
+          resolve();
+        });
+        child.stdin.end();
+      });
+    },
+  };
 }

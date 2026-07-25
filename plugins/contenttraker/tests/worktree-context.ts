@@ -51,6 +51,9 @@ const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), "contenttraker-workt
 async function run(): Promise<void> {
   try {
     process.env.CONTENTTRAKER_ENVIRONMENT = "staging";
+    delete process.env.CONTENTTRAKER_CREDENTIAL_PROFILE;
+    delete process.env.CONTENTTRAKER_REQUIRED_USER_EMAIL;
+    delete process.env.CONTENTTRAKER_REQUIRE_IDENTITY_POLICY;
 
     normalizeRepositoryRemotes();
 

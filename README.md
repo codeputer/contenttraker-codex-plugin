@@ -12,6 +12,17 @@ An installation's authenticated ContentTraker user is a separate runtime identit
 
 The plugin package is installable and its MCP process starts without the private ContentTraker repository. Delegated sign-in uses capability-negotiated OAuth device authorization or authorization code with PKCE and never reuses a ChatGPT desktop connector session.
 
+## Which ContentTraker interface this is
+
+Codex can expose two independent ContentTraker surfaces:
+
+- `contenttraker@contenttraker` is this local plugin. It launches `contenttraker-codex-adapter` over stdio and that local process calls the ContentTraker HTTPS JSON API.
+- `ContentTraker.com` in the Apps UI is a separate app/connector exposed by Codex, with independent metadata and versioning. It is not bundled, registered, authenticated, or reused by this repository.
+
+`inspect_runtime_capabilities` identifies the local plugin ID and version, MCP registration key, stdio host boundary, and HTTPS JSON API upstream without authenticating. A hostname containing `mcp` is still an HTTPS API origin when the local adapter calls it; it does not turn the local adapter into the remote app connection.
+
+When both surfaces are visible, Codex project work should use only tools with local `mcp__contenttraker_codex_adapter` provenance. The separate connector is currently observed as `mcp__codex_apps__contenttraker_com`, but that namespace is not controlled by this repository. If only that connector surface is visible, the local plugin tool surface is missing and the task should stop with that exact boundary.
+
 An isolated WSL host must also provide:
 
 - Node.js 18 or newer;
@@ -22,10 +33,10 @@ Windows browser interoperability remains disabled inside WSL. On a headless host
 
 ## Install a reviewed release
 
-The consolidated reviewed release uses the permanent plugin identity `contenttraker@contenttraker`. Install the immutable `v0.4.0` tag:
+The consolidated reviewed release uses the permanent plugin identity `contenttraker@contenttraker`. Install the immutable `v0.4.1` tag:
 
 ```bash
-codex plugin marketplace add https://github.com/codeputer/contenttraker-codex-plugin.git --ref v0.4.0
+codex plugin marketplace add https://github.com/codeputer/contenttraker-codex-plugin.git --ref v0.4.1
 codex plugin marketplace list
 codex plugin list
 codex plugin add contenttraker@contenttraker
@@ -49,7 +60,7 @@ Use `inspect_contenttraker_oauth_metadata` to validate the live protected-resour
 
 Interactive authorization supports platform browser launch, a manual loopback URL, and OAuth device authorization when live server metadata advertises it. `CONTENTTRAKER_DELEGATED_FLOW=auto` keeps authorization code + PKCE for browser-capable hosts and prefers device code for manual/headless interaction when available. Use `begin_contenttraker_login`, then `poll_contenttraker_login` (optionally waiting up to 15 seconds per call). Browser launch is only a convenience; a failed launch leaves the returned flow active. The v0.1 authorization tool names remain as compatibility aliases. See [Authorization interaction](docs/authorization-interaction.md).
 
-Delegated refresh credentials use an OS keyring according to host capabilities. `CONTENTTRAKER_CREDENTIAL_PROFILE` defaults to `default`; its persistent lookup key is stable across tasks and includes environment, issuer, audience, client ID, profile, and normalized `CONTENTTRAKER_REQUIRED_USER_EMAIL`. Connection and session IDs are excluded. A new Codex task refreshes that credential without repeating interactive authorization. See [Credential storage](docs/credential-storage.md).
+Delegated refresh credentials use an OS keyring according to host capabilities. The packaged plugin requires a named `CONTENTTRAKER_CREDENTIAL_PROFILE` plus an exact `CONTENTTRAKER_REQUIRED_USER_EMAIL`; it refuses the unbound `default` profile. Its persistent lookup key is stable across tasks and includes environment, issuer, audience, client ID, profile, and normalized required email. Connection and session IDs are excluded. A new Codex task refreshes only that bound credential without repeating interactive authorization. See [Credential storage](docs/credential-storage.md).
 
 ## Authentication and host identity policy
 
@@ -66,14 +77,32 @@ API and token audience: https://mcp.staging.contenttraker.com
 OAuth issuer:           https://tokenbroker.staging.contenttraker.com
 ```
 
-Set the identity required by a managed host before starting Codex:
+Set the identity and a host-isolated profile before starting Codex:
 
 ```bash
+export CONTENTTRAKER_CREDENTIAL_PROFILE='organization-host'
 export CONTENTTRAKER_REQUIRED_USER_EMAIL='user@example.org'
 codex
 ```
 
-The value is a host policy input, not a credential, and is not built into the plugin. `get_current_user` calls `GET /me`, reports the effective ContentTraker identity, and states whether it matches the policy. Every subsequent API operation repeats the same effective-caller check. A configured mismatch stops the operation before the requested read or write.
+These are host policy inputs, not credentials, and no organization or user value is built into the public plugin. The plugin manifest allowlists these variable names, and Codex forwards their host values into the local adapter. If either value is missing, the packaged adapter fails before loading any stored credential. `get_current_user` calls `GET /me`, reports the effective ContentTraker identity, and states whether it matches the policy. Every subsequent API operation repeats the same effective-caller check. A mismatch stops the operation before the requested read or write.
+
+For Codex Desktop on Windows, persist the non-secret policy at user scope, then fully restart Codex:
+
+```powershell
+[Environment]::SetEnvironmentVariable(
+  'CONTENTTRAKER_CREDENTIAL_PROFILE',
+  'organization-windows',
+  'User'
+)
+[Environment]::SetEnvironmentVariable(
+  'CONTENTTRAKER_REQUIRED_USER_EMAIL',
+  'user@example.org',
+  'User'
+)
+```
+
+An isolated WSL identity must be configured inside that WSL environment with its own profile and Linux keyring. Do not place a WSL-only identity in the Windows user environment.
 
 Normal verification order:
 
@@ -157,7 +186,7 @@ Then replace the marketplace snapshot and install the permanent public identity:
 
 ```bash
 codex plugin marketplace remove contenttraker
-codex plugin marketplace add https://github.com/codeputer/contenttraker-codex-plugin.git --ref v0.4.0
+codex plugin marketplace add https://github.com/codeputer/contenttraker-codex-plugin.git --ref v0.4.1
 codex plugin add contenttraker@contenttraker
 ```
 

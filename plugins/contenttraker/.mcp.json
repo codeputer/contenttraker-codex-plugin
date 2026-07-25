@@ -5,8 +5,20 @@
       "command": "node",
       "args": ["./dist/server.mjs"],
       "env": {
-        "CONTENTTRAKER_ENVIRONMENT": "staging"
-      }
+        "CONTENTTRAKER_REQUIRE_IDENTITY_POLICY": "true"
+      },
+      "env_vars": [
+        "CONTENTTRAKER_ENVIRONMENT",
+        "CONTENTTRAKER_RUNTIME_PROFILE",
+        "CONTENTTRAKER_AUTH_MODE",
+        "CONTENTTRAKER_DELEGATED_FLOW",
+        "CONTENTTRAKER_BROWSER_MODE",
+        "CONTENTTRAKER_CREDENTIAL_STORE",
+        "CONTENTTRAKER_CREDENTIAL_PROFILE",
+        "CONTENTTRAKER_REQUIRED_USER_EMAIL",
+        "CONTENTTRAKER_ALLOW_EPHEMERAL_PRODUCTION",
+        "CONTENTTRAKER_ENABLE_PRODUCTION_WRITES"
+      ]
     }
   }
 }

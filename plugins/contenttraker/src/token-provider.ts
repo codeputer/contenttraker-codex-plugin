@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import { resolveAdapterEnvironment } from "./environment-profile.js";
+import { inspectContentTrakerIdentityPolicy } from "./identity-policy.js";
 import {
   createCredentialHandle,
   createSecureCredentialStore,
@@ -118,9 +119,19 @@ export function createContentTrakerTokenProvider(
   credentialStore: SecureCredentialStore = createSecureCredentialStore(env),
   oauthClient?: ContentTrakerOAuthClient,
 ): ContentTrakerTokenProvider {
+  const identityPolicy = inspectContentTrakerIdentityPolicy(env);
+  if (!identityPolicy.valid) {
+    return new InvalidContentTrakerTokenProvider(
+      "contenttraker-identity-policy",
+      identityPolicy.diagnostics.join(" "),
+    );
+  }
   const requestedMode = env.CONTENTTRAKER_AUTH_MODE?.trim().toLowerCase() || "auto";
   if (!["auto", "delegated", "workload"].includes(requestedMode)) {
-    return new InvalidContentTrakerTokenProvider(requestedMode);
+    return new InvalidContentTrakerTokenProvider(
+      requestedMode,
+      "CONTENTTRAKER_AUTH_MODE must be auto, delegated, or workload. Legacy service bearer-token configuration is not supported.",
+    );
   }
   const mode = requestedMode === "auto"
     ? inspectRuntimeCapabilities(env).selectedAuthenticationMode
@@ -659,23 +670,24 @@ export class UnavailableWorkloadContentTrakerTokenProvider implements ContentTra
 }
 
 class InvalidContentTrakerTokenProvider implements ContentTrakerTokenProvider {
-  constructor(private readonly configuredMode: string) {}
+  constructor(
+    private readonly configuredMode: string,
+    private readonly diagnostic: string,
+  ) {}
   getStatus(): TokenStrategyStatus {
     return { mode: "invalid", configured: false, accessTokenPresent: false, source: this.configuredMode, tokenExpiryStatus: "missing" };
   }
   async getAuthorizationHeader(): Promise<ContentTrakerAuthorizationSnapshot> {
-    throw new Error(
-      "CONTENTTRAKER_AUTH_MODE must be auto, delegated, or workload. Legacy service bearer-token configuration is not supported.",
-    );
+    throw new Error(this.diagnostic);
   }
   async beginAuthorization(): Promise<AuthorizationFlowResult> {
-    return invalidAuthorizationMode();
+    return blockedAuthorization(this.diagnostic);
   }
   async getAuthorizationStatus(): Promise<AuthorizationFlowResult> {
-    return invalidAuthorizationMode();
+    return blockedAuthorization(this.diagnostic);
   }
   async cancelAuthorization(): Promise<AuthorizationFlowResult> {
-    return invalidAuthorizationMode();
+    return blockedAuthorization(this.diagnostic);
   }
   getSecurityDiagnostics(context: ContentTrakerRequestSecurityContext): RequestSecurityDiagnostics {
     return {
@@ -739,6 +751,10 @@ function resolveCredentialBinding(
   context: ContentTrakerRequestSecurityContext,
   env: NodeJS.ProcessEnv,
 ): CredentialBinding {
+  const identityPolicy = inspectContentTrakerIdentityPolicy(env);
+  if (!identityPolicy.valid) {
+    throw new Error(identityPolicy.diagnostics.join(" "));
+  }
   const configuredProfile = env.CONTENTTRAKER_CREDENTIAL_PROFILE?.trim() || "default";
   if (!/^[a-z0-9][a-z0-9._-]{0,63}$/iu.test(configuredProfile)) {
     throw new Error(
@@ -928,12 +944,10 @@ function workloadAuthorizationBlocked(): AuthorizationFlowResult {
   };
 }
 
-function invalidAuthorizationMode(): AuthorizationFlowResult {
+function blockedAuthorization(diagnostic: string): AuthorizationFlowResult {
   return {
     status: "blocked",
-    diagnostics: [
-      "CONTENTTRAKER_AUTH_MODE must be auto, delegated, or workload. Legacy service bearer-token configuration is not supported.",
-    ],
+    diagnostics: [diagnostic],
   };
 }
 

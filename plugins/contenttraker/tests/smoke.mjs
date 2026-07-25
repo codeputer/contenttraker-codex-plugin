@@ -12,8 +12,25 @@ const serverPath = path.resolve(__dirname, "../node_modules/.cache/contenttraker
 const productionServerPath = path.resolve(__dirname, "../dist/server.mjs");
 const repositoryRoot = path.resolve(__dirname, "../../..");
 const mcpManifest = JSON.parse(fs.readFileSync(path.resolve(__dirname, "../.mcp.json"), "utf8"));
-assert.deepEqual(mcpManifest.mcpServers["contenttraker-codex-adapter"].env, {
-  CONTENTTRAKER_ENVIRONMENT: "staging",
+assert.deepEqual(mcpManifest.mcpServers["contenttraker-codex-adapter"], {
+  cwd: ".",
+  command: "node",
+  args: ["./dist/server.mjs"],
+  env: {
+    CONTENTTRAKER_REQUIRE_IDENTITY_POLICY: "true",
+  },
+  env_vars: [
+    "CONTENTTRAKER_ENVIRONMENT",
+    "CONTENTTRAKER_RUNTIME_PROFILE",
+    "CONTENTTRAKER_AUTH_MODE",
+    "CONTENTTRAKER_DELEGATED_FLOW",
+    "CONTENTTRAKER_BROWSER_MODE",
+    "CONTENTTRAKER_CREDENTIAL_STORE",
+    "CONTENTTRAKER_CREDENTIAL_PROFILE",
+    "CONTENTTRAKER_REQUIRED_USER_EMAIL",
+    "CONTENTTRAKER_ALLOW_EPHEMERAL_PRODUCTION",
+    "CONTENTTRAKER_ENABLE_PRODUCTION_WRITES",
+  ],
 });
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "contenttraker-codex-"));
 const testCertificate = await generateSelfSignedCertificate(
@@ -749,14 +766,31 @@ async function verifyProductionBundleStarts() {
       },
     },
     { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} },
-  ], { CONTENTTRAKER_ENVIRONMENT: "staging" }, productionServerPath, false);
+    {
+      jsonrpc: "2.0",
+      id: 3,
+      method: "tools/call",
+      params: {
+        name: "logout_contenttraker",
+        arguments: { confirmation: "LOGOUT_CONTENTTRAKER" },
+      },
+    },
+  ], {
+    CONTENTTRAKER_ENVIRONMENT: "staging",
+    CONTENTTRAKER_REQUIRE_IDENTITY_POLICY: "true",
+  }, productionServerPath, false);
   assert.equal(result.status, 0, result.stderr || `Production bundle exited with signal ${result.signal ?? "unknown"}`);
   assert.equal(result.stderr, "");
   const responses = result.stdout.split(/\r?\n/u).filter(Boolean).map((line) => JSON.parse(line));
-  assert.equal(responses.length, 2);
+  assert.equal(responses.length, 3);
   assert.equal(responses[1].result.tools.some((tool) => tool.name === "inspect_runtime_capabilities"), true);
   assert.equal(responses[1].result.tools.some((tool) => tool.name === "confirm_contenttraker_context"), true);
   assert.equal(responses[1].result.tools.some((tool) => tool.name === "reset_contenttraker_context"), true);
+  assert.equal(responses[2].result.structuredContent.status, "blocked");
+  assert.match(
+    responses[2].result.structuredContent.diagnostics.join(" "),
+    /No local credential was addressed or deleted/,
+  );
 }
 
 async function callTool({ name, env, arguments: toolArguments }) {

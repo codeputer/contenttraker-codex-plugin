@@ -14,13 +14,13 @@ Explicit platform-provider modes must match the host and their required command.
 
 ## Durable profiles
 
-`CONTENTTRAKER_CREDENTIAL_PROFILE` defaults to `default`. It accepts 1-64 letters, numbers, dots, underscores, or hyphens and is normalized to lowercase. The profile forms a discoverable key from:
+The underlying adapter defaults `CONTENTTRAKER_CREDENTIAL_PROFILE` to `default`, but the packaged Codex plugin requires an explicit named profile plus `CONTENTTRAKER_REQUIRED_USER_EMAIL` and rejects that unbound default before reading the keyring. Profile names accept 1-64 letters, numbers, dots, underscores, or hyphens and are normalized to lowercase. The profile forms a discoverable key from:
 
 - ContentTraker environment;
 - OAuth authority;
 - API resource/audience;
 - public client `codex-mcp`;
-- normalized `CONTENTTRAKER_REQUIRED_USER_EMAIL`, or an explicit unbound marker; and
+- normalized `CONTENTTRAKER_REQUIRED_USER_EMAIL`; and
 - profile name.
 
 Connection ID and MCP session ID are deliberately excluded. The encrypted provider value contains the refresh credential plus the server-issued subject and binding metadata. On a new task, the adapter loads the profile, validates every binding, refreshes it, validates that the token issuer and subject did not change, rotates the stored refresh credential, and then binds the access token to the new connection/session.
