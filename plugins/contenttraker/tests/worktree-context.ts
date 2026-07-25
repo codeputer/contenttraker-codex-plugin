@@ -450,14 +450,14 @@ async function resetIsWorktreeAndEnvironmentScoped(
   };
   assert.equal(registry.environments.staging.projects.length, 1);
   assert.equal(
-    path.resolve(registry.environments.staging.projects[0].repositoryRoot!),
-    path.resolve(secondary.repositoryRoot),
+    fs.realpathSync.native(path.resolve(registry.environments.staging.projects[0].repositoryRoot!)),
+    fs.realpathSync.native(path.resolve(secondary.repositoryRoot)),
   );
   assert.equal(registry.environments.staging.defaults?.workspaceId, "workspace-default");
   assert.equal(registry.environments.production.projects.length, 1);
   assert.equal(
-    path.resolve(registry.environments.production.projects[0].repositoryRoot!),
-    path.resolve(primary.repositoryRoot),
+    fs.realpathSync.native(path.resolve(registry.environments.production.projects[0].repositoryRoot!)),
+    fs.realpathSync.native(path.resolve(primary.repositoryRoot)),
   );
 
   const resetResolution = await resolveOperationContext(
