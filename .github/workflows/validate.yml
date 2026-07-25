@@ -51,7 +51,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install Git runtime dependency
-        run: apt-get update && apt-get install -y --no-install-recommends git ca-certificates
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git ca-certificates
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - run: npm ci
       - run: npm audit --omit=dev
       - run: npm test

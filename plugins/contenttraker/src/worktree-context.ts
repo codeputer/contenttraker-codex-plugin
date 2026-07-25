@@ -101,9 +101,9 @@ export function writeConfirmedWorktreeContext(
   binding: WorktreeContextBinding,
   options: { repairMalformed?: boolean } = {},
 ): string {
-  ensureWorktreeContextIgnored(identity);
   const markerPath = worktreeContextPath(identity);
   assertSafeMarkerLocation(identity, markerPath);
+  ensureWorktreeContextIgnored(identity);
   const snapshot = loadWorktreeContext(identity, binding.environment);
   if (snapshot.blocked && !options.repairMalformed) {
     throw new Error(snapshot.diagnostics[0]);
@@ -129,9 +129,9 @@ export function resetWorktreeContextBinding(
   otherEnvironmentsPreserved: boolean;
   tombstone: WorktreeContextReset;
 } {
-  ensureWorktreeContextIgnored(identity);
   const markerPath = worktreeContextPath(identity);
   assertSafeMarkerLocation(identity, markerPath);
+  ensureWorktreeContextIgnored(identity);
   const snapshot = loadWorktreeContext(identity, environment);
   const invalidMarkerReplaced = snapshot.blocked
     && snapshot.diagnostics.every((diagnostic) =>
