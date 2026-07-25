@@ -1,12 +1,12 @@
 {
   "name": "contenttraker",
   "interface": {
-    "displayName": "ContentTraker"
+    "displayName": "ContentTraker Local Adapter"
   },
   "plugins": [
     {
       "name": "contenttraker",
-      "version": "0.4.0",
+      "version": "0.4.1",
       "source": {
         "source": "local",
         "path": "./plugins/contenttraker"

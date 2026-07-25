@@ -38,7 +38,7 @@ For delegated interaction:
 
 The verification/user code is safe to display, but the opaque device code, PKCE verifier, authorization code, access token, and refresh credential are never returned by the tool. A failed optional browser launch leaves device polling active. `cancel_contenttraker_authorization` closes only a pending local flow; it does not revoke an issued credential.
 
-The default credential profile is `default`. Its key includes the normalized required user email and excludes connection/session IDs. Each profile binds to exactly one server-issued subject and cannot be silently overwritten by another user. A subsequent task in the same WSL user session reads the profile from Secret Service, rotates its refresh credential, and then verifies `/me` before business operations without repeating interactive authorization.
+Set a named credential profile for the isolated WSL host. Its key includes the normalized required user email and excludes connection/session IDs. Each profile binds to exactly one server-issued subject and cannot be silently overwritten by another user. A subsequent task in the same WSL user session reads the profile from Secret Service, rotates its refresh credential, and then verifies `/me` before business operations without repeating interactive authorization.
 
 ## Fail-closed behavior
 
@@ -52,4 +52,4 @@ Start WSL with no display variables, Windows interoperability, or drive automoun
 
 ## Host identity check
 
-Set `CONTENTTRAKER_REQUIRED_USER_EMAIL` in the environment that launches Codex. After sign-in, call `get_current_user`. The plugin compares the server-returned email with the configured value using a case-insensitive exact match. The same policy is enforced again before every ContentTraker API operation.
+Set both `CONTENTTRAKER_CREDENTIAL_PROFILE` and `CONTENTTRAKER_REQUIRED_USER_EMAIL` in the isolated WSL environment that launches Codex. Use a profile name specific to that WSL host and identity. After sign-in, call `get_current_user`. The plugin compares the server-returned email with the configured value using a case-insensitive exact match. The same policy is enforced again before every ContentTraker API operation.

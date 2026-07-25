@@ -3,13 +3,15 @@ name: contenttraker-mcp
 description: Use the local ContentTraker adapter to verify identity, resolve workspace context, and work with digital assets.
 ---
 
-# ContentTraker Codex Adapter
+# ContentTraker Local Adapter
 
-Use this plugin's local MCP tools. Do not reuse a ChatGPT connector session, request bearer tokens, inspect browser cookies, or require a direct remote MCP registration.
+Use this plugin's local `contenttraker-codex-adapter` MCP tools. Their Codex provenance is `mcp__contenttraker_codex_adapter`; the adapter runs locally over stdio and calls the ContentTraker HTTPS JSON API.
+
+`ContentTraker.com` is a separate app/connector exposed by Codex. Its tools are currently observed with `mcp__codex_apps__contenttraker_com` provenance, but that namespace is not controlled by this repository. Never use that surface as this plugin, reuse its connector session, or treat its displayed version as the local plugin version. If the local adapter tools are absent and only the app/connector is exposed, report `wrong_contenttraker_interface: local contenttraker-codex-adapter tools are not exposed in this Codex task` and stop. Do not request bearer tokens, inspect browser cookies, or require a direct remote MCP registration.
 
 Use `$contenttraker-select` to live-verify and save a workspace plus optional project for the current Git worktree. Use `$contenttraker-reset` to clear only the current worktree and environment's saved context. Plain-language requests for those actions are also supported. Native `/contenttraker-select` and `/contenttraker-reset` aliases are not part of the current plugin contract.
 
-Call `inspect_runtime_capabilities` before authentication troubleshooting or host-specific setup. ContentTraker target environment and host runtime profile are independent; this read-only tool reports the selected profile and redacted host capability diagnostics without authenticating or calling ContentTraker.
+Call `inspect_runtime_capabilities` before authentication troubleshooting or host-specific setup. ContentTraker target environment and host runtime profile are independent; this read-only tool reports the local adapter identity, plugin version, stdio transport, HTTPS API upstream, selected profile, identity-policy readiness, and redacted host capability diagnostics without authenticating or calling ContentTraker.
 
 Authentication defaults to capability-selected `auto`: delegated OAuth for non-container user hosts and workload OAuth for container or CI hosts. Workload mode remains blocked until both live server metadata and an implemented host provider support it. Never request or configure a raw access token to bypass that boundary.
 
@@ -17,7 +19,7 @@ Call `inspect_contenttraker_oauth_metadata` when diagnosing authorization-server
 
 If delegated authentication is needed, call `begin_contenttraker_login`. When it returns `pending`, present its authorization URL without rewriting it. For `device-code`, also present `userCode` and `verificationUri`; never request or expose the opaque device code. Then call `poll_contenttraker_login` with a bounded `waitSeconds` value. Do not ask the user for an authorization code, token, verifier, cookie, or refresh credential. Use `cancel_contenttraker_authorization` only to cancel a pending local interaction. After `authorized`, call `get_current_user`; authorization status alone does not prove the effective ContentTraker identity. `authentication_required` means the explicit login sequence is required; business tools must not launch a browser.
 
-The adapter restores a persistent, required-email-bound `CONTENTTRAKER_CREDENTIAL_PROFILE` automatically in a new task. Treat a profile/subject mismatch as an identity boundary and stop; do not switch profiles or delete credentials without user direction. `logout_contenttraker` requires the literal confirmation `LOGOUT_CONTENTTRAKER`, deletes only the selected v2 local profile, and does not revoke server authorization.
+The packaged adapter requires both a named `CONTENTTRAKER_CREDENTIAL_PROFILE` and `CONTENTTRAKER_REQUIRED_USER_EMAIL`. It restores only that persistent, required-email-bound profile in a new task. If either host value is missing, it blocks before inspecting or restoring any stored credential. Treat a profile/subject mismatch as an identity boundary and stop; do not switch profiles or delete credentials without user direction. `logout_contenttraker` requires the literal confirmation `LOGOUT_CONTENTTRAKER`, deletes only the selected v2 local profile, and does not revoke server authorization.
 
 Before any write:
 

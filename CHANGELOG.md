@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.1 - 2026-07-25
+
+- Fixes the Codex plugin manifest so the local MCP child receives the host-owned ContentTraker environment, runtime, credential-profile, and required-user policy values through the supported `env_vars` allowlist.
+- Makes the packaged adapter fail closed before credential restoration when the required email or named host-isolated credential profile is absent.
+- Distinguishes the local `contenttraker-codex-adapter` stdio server/HTTPS API client from the separate `ContentTraker.com` app/connector exposed by Codex.
+- Adds an unauthenticated adapter-identity diagnostic and a real Codex app-server launch regression for installed-plugin environment forwarding.
+
 ## 0.4.0 - 2026-07-25
 
 - Consolidates the public adapter, cross-platform authentication, and durable per-worktree context work onto the single `development` release line.

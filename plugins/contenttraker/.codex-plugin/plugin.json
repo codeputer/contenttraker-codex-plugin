@@ -1,6 +1,6 @@
 {
   "name": "contenttraker",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Secure local Codex adapter for ContentTraker workspace and digital asset operations.",
   "author": {
     "name": "Richard Reukema",
@@ -13,9 +13,9 @@
   "keywords": ["contenttraker", "codex", "mcp", "oauth", "wsl"],
   "skills": "./skills/",
   "interface": {
-    "displayName": "ContentTraker",
-    "shortDescription": "Use ContentTraker securely from a local Codex host.",
-    "longDescription": "Connects Codex to the documented ContentTraker API through capability-selected authentication and secure credential providers, verifies the effective caller, and provides durable per-worktree workspace context plus digital asset tools.",
+    "displayName": "ContentTraker Local Adapter",
+    "shortDescription": "Use ContentTraker through the local Codex adapter.",
+    "longDescription": "Codex launches this local stdio MCP adapter as a child process. The adapter calls the documented ContentTraker HTTPS JSON API, enforces a host-owned identity policy, and provides durable per-worktree workspace context plus digital asset tools. The package does not bundle or reuse the separate ContentTraker.com app connector.",
     "developerName": "PhxBiz",
     "category": "Productivity",
     "capabilities": ["MCP", "OAuth PKCE", "OAuth Device Authorization", "Restart-safe OS Keyring", "Durable Worktree Context", "Digital Assets"],

@@ -1,5 +1,19 @@
 # Troubleshooting
 
+## Wrong ContentTraker surface or version is shown
+
+The reported screenshot showed `ContentTraker.com 1.0.0` in the Apps UI. That is a separate app/connector exposed by Codex, and its version is independent of this plugin. This local plugin is `contenttraker@contenttraker`; its MCP registration is `contenttraker-codex-adapter`, and its tools have `mcp__contenttraker_codex_adapter` provenance.
+
+Call the local `inspect_runtime_capabilities` tool. It must report `hostBoundary: local-codex-plugin`, `codexTransport: stdio`, `upstreamInterface: contenttraker-https-json-api`, and `bundlesRemoteAppMapping: false`. If the local tool is absent, first verify that `contenttraker@contenttraker` is installed and enabled, then open a fresh task or restart Codex to refresh the plugin catalog. Require the local namespace after refresh; if it is still absent, report the exact task tool-surface failure. The separate connector is currently observed as `mcp__codex_apps__contenttraker_com`, but that namespace is not a contract owned by this repository.
+
+This repository cannot disable an unrelated app from its plugin manifest. Codex host configuration can disable the exact app ID returned by Codex's app catalog while keeping `[plugins."contenttraker@contenttraker".mcp_servers."contenttraker-codex-adapter"]` enabled. Never guess the app ID from its display name.
+
+## Identity policy is required
+
+The packaged plugin blocks before credential restoration unless the Codex host supplies both a named `CONTENTTRAKER_CREDENTIAL_PROFILE` and `CONTENTTRAKER_REQUIRED_USER_EMAIL`. Set them in the environment that launches Codex, restart Codex, open a new task, and call `inspect_runtime_capabilities`. Its `identityPolicy` must be valid before authentication.
+
+Do not work around this diagnostic with the `default` profile, an app/connector session, a raw token, or another user's stored credential.
+
 ## `authentication_required`
 
 No usable in-process or v2 keyring credential was found. Run `begin_contenttraker_login`, present only its user-facing URL/code, poll with `poll_contenttraker_login`, then call `get_current_user`. Business tools never launch a browser.
@@ -50,10 +64,10 @@ Use `$contenttraker-select`, `$contenttraker-reset`, or plain language. Native `
 
 The exact selected workspace ID/key was absent from the authenticated user's `/workspaces` response. No write was sent. Verify `get_current_user`, list workspaces again, and do not substitute a project name or another cached identity.
 
-## Migrating to the consolidated v0.4.0 plugin
+## Migrating to the identity-bound v0.4.1 plugin
 
 Run `codex plugin list --json` before changing the installation. Public releases use `contenttraker@contenttraker`; a separate older private/local package used `contenttraker-codex@contenttraker`. Remove every installed ContentTraker identity that the list actually reports before removing the `contenttraker` marketplace, because both identities register the same `contenttraker-codex-adapter` MCP key.
 
-Add the marketplace again at `v0.4.0`, install only `contenttraker@contenttraker`, and start a new Codex task. The final plugin list must contain exactly that one ContentTraker plugin at version 0.4.0.
+Add the marketplace again at `v0.4.1`, install only `contenttraker@contenttraker`, and start a new Codex task. The final plugin list must contain exactly that one ContentTraker plugin at version 0.4.1. Configure the named profile and exact required email in the environment that launches Codex before restarting.
 
-Plugin and marketplace removal do not delete operating-system keyring entries or remote assets. Version 0.4.0 uses the identity-bound v2 keyring namespace and never enumerates old session-derived entries, so complete one explicit login after migration. Remove legacy `ContentTraker Codex Adapter` credentials only through the operating-system credential UI when local retention policy requires physical deletion.
+Plugin and marketplace removal do not delete operating-system keyring entries or remote assets. Since version 0.4.0 the plugin uses the identity-bound v2 keyring namespace and never enumerates old session-derived entries. Version 0.4.1 also prevents the packaged adapter from loading an unbound/default profile. Remove legacy `ContentTraker Codex Adapter` credentials only through the operating-system credential UI when local retention policy requires physical deletion.

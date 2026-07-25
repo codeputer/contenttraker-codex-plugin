@@ -294,6 +294,18 @@ server.registerTool(
   async (_input, extra) => {
     const context = securityContextFactory.create(extra);
     const before = tokenProvider.getStatus(context);
+    if (before.mode !== "delegated-user-pkce") {
+      const result = {
+        status: "blocked",
+        diagnostics: [
+          "Logout is unavailable because delegated identity policy is invalid or workload authentication is selected. No local credential was addressed or deleted.",
+        ],
+      };
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+        structuredContent: result,
+      };
+    }
     try {
       await tokenProvider.invalidate(context);
       const result = {

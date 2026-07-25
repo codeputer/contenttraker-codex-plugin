@@ -15,6 +15,9 @@ import type { ContentTrakerContext, ContentTrakerRequestSecurityContext } from "
 const audience = "https://mcp.staging.contenttraker.com";
 process.env.CONTENTTRAKER_ENVIRONMENT = "staging";
 process.env.CONTENTTRAKER_STAGING_API_BASE_URL = "https://mcp.staging.contenttraker.com";
+delete process.env.CONTENTTRAKER_CREDENTIAL_PROFILE;
+delete process.env.CONTENTTRAKER_REQUIRED_USER_EMAIL;
+delete process.env.CONTENTTRAKER_REQUIRE_IDENTITY_POLICY;
 
 async function concurrentUsersRetainDistinctCallerIdentity(): Promise<void> {
   const store = new MemoryCredentialStore();
@@ -217,6 +220,51 @@ async function environmentIsolationAndNoInteractiveFallback(): Promise<void> {
   )).status, "blocked");
 }
 
+async function packagedIdentityPolicyFailsClosedBeforeCredentialUse(): Promise<void> {
+  const store = new MemoryCredentialStore();
+  const missingPolicy = createContentTrakerTokenProvider(
+    delegatedEnv({ CONTENTTRAKER_REQUIRE_IDENTITY_POLICY: "true" }),
+    store,
+    new FakeOAuthClient(new Map()) as never,
+  );
+  assert.equal(missingPolicy.getStatus().mode, "invalid");
+  await assert.rejects(
+    () => missingPolicy.getAuthorizationHeader(
+      security("identity-policy-connection", "identity-policy-session", "identity-policy-request"),
+    ),
+    /No stored credential will be restored or used/,
+  );
+  assert.equal(store.values.size, 0);
+  assert.equal(store.getCalls, 0);
+  assert.equal(
+    (await missingPolicy.beginAuthorization(
+      security("identity-policy-connection", "identity-policy-session", "identity-policy-login"),
+    )).status,
+    "blocked",
+  );
+
+  const defaultProfile = createContentTrakerTokenProvider(
+    delegatedEnv({
+      CONTENTTRAKER_REQUIRE_IDENTITY_POLICY: "true",
+      CONTENTTRAKER_REQUIRED_USER_EMAIL: "phoenix@example.org",
+    }),
+    store,
+    new FakeOAuthClient(new Map()) as never,
+  );
+  assert.equal(defaultProfile.getStatus().mode, "invalid");
+
+  const configuredPolicy = createContentTrakerTokenProvider(
+    delegatedEnv({
+      CONTENTTRAKER_REQUIRE_IDENTITY_POLICY: "true",
+      CONTENTTRAKER_CREDENTIAL_PROFILE: "phoenix-windows",
+      CONTENTTRAKER_REQUIRED_USER_EMAIL: "phoenix@example.org",
+    }),
+    store,
+    new FakeOAuthClient(new Map()) as never,
+  );
+  assert.equal(configuredPolicy.getStatus().mode, "delegated-user-pkce");
+}
+
 async function effectiveCallerVerificationAndAudienceBindingAreMandatory(): Promise<void> {
   const oauth = new FakeOAuthClient(new Map([["connection-origin", "user-origin"]]));
   const provider = new DelegatedContentTrakerTokenProvider(new MemoryCredentialStore(), oauth as never, delegatedEnv());
@@ -311,7 +359,11 @@ async function parallelUnauthorizedRetriesUseOneRefresh(): Promise<void> {
 
 class MemoryCredentialStore implements SecureCredentialStore {
   readonly values = new Map<string, string>();
-  async get(handle: string): Promise<string | undefined> { return this.values.get(handle); }
+  getCalls = 0;
+  async get(handle: string): Promise<string | undefined> {
+    this.getCalls += 1;
+    return this.values.get(handle);
+  }
   async set(handle: string, secret: string): Promise<void> { this.values.set(handle, secret); }
   async delete(handle: string): Promise<void> { this.values.delete(handle); }
 }
@@ -482,6 +534,7 @@ await workspaceAndIdentityNeverCross();
 await oneSessionRefreshAndRevocationDoNotAffectAnother();
 await inFlightRequestRetainsCapturedCredential();
 await environmentIsolationAndNoInteractiveFallback();
+await packagedIdentityPolicyFailsClosedBeforeCredentialUse();
 await effectiveCallerVerificationAndAudienceBindingAreMandatory();
 await secretsAreRedactedAndUnsupportedModesFailClosed();
 await parallelRefreshUsesSingleFlight();

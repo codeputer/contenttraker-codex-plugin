@@ -19,6 +19,22 @@ const linuxDesktop = facts({
 
 const linuxResult = inspectRuntimeCapabilities(delegatedEnv(), linuxDesktop);
 assert.equal(linuxResult.status, "ready");
+assert.deepEqual(linuxResult.adapterIdentity, {
+  pluginId: "contenttraker@contenttraker",
+  pluginName: "contenttraker",
+  pluginVersion: "0.4.1",
+  mcpRegistrationKey: "contenttraker-codex-adapter",
+  hostBoundary: "local-codex-plugin",
+  codexTransport: "stdio",
+  upstreamInterface: "contenttraker-https-json-api",
+  bundlesRemoteAppMapping: false,
+});
+assert.deepEqual(linuxResult.identityPolicy, {
+  required: false,
+  valid: true,
+  requiredUserEmailConfigured: false,
+  namedCredentialProfileConfigured: false,
+});
 assert.equal(linuxResult.selectedProfile, "linux-desktop");
 assert.equal(linuxResult.selectedStrategy.authentication, "delegated-user-pkce");
 assert.equal(linuxResult.selectedStrategy.credentialPersistence, "linux-secret-service");
@@ -239,6 +255,31 @@ const invalidDelegatedFlow = inspectRuntimeCapabilities(
 );
 assert.equal(invalidDelegatedFlow.status, "invalid");
 assert.match(invalidDelegatedFlow.diagnostics.join(" "), /CONTENTTRAKER_DELEGATED_FLOW/);
+
+const managedIdentity = inspectRuntimeCapabilities(
+  delegatedEnv({
+    CONTENTTRAKER_REQUIRE_IDENTITY_POLICY: "true",
+    CONTENTTRAKER_CREDENTIAL_PROFILE: "codex-install-smoke",
+    CONTENTTRAKER_REQUIRED_USER_EMAIL: "codex-install-smoke@example.invalid",
+  }),
+  linuxDesktop,
+);
+assert.equal(managedIdentity.status, "ready");
+assert.deepEqual(managedIdentity.identityPolicy, {
+  required: true,
+  valid: true,
+  requiredUserEmailConfigured: true,
+  namedCredentialProfileConfigured: true,
+});
+
+const missingManagedIdentity = inspectRuntimeCapabilities(
+  delegatedEnv({ CONTENTTRAKER_REQUIRE_IDENTITY_POLICY: "true" }),
+  linuxDesktop,
+);
+assert.equal(missingManagedIdentity.status, "invalid");
+assert.equal(missingManagedIdentity.identityPolicy.required, true);
+assert.equal(missingManagedIdentity.identityPolicy.valid, false);
+assert.match(missingManagedIdentity.diagnostics.join(" "), /No stored credential will be restored or used/);
 
 console.log("ContentTraker runtime capability tests passed.");
 

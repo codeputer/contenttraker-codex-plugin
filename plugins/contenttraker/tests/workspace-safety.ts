@@ -16,6 +16,9 @@ Object.assign(process.env, {
   CONTENTTRAKER_STAGING_API_BASE_URL: apiOrigin,
   CONTENTTRAKER_AUTH_MODE: "delegated",
 });
+delete process.env.CONTENTTRAKER_CREDENTIAL_PROFILE;
+delete process.env.CONTENTTRAKER_REQUIRED_USER_EMAIL;
+delete process.env.CONTENTTRAKER_REQUIRE_IDENTITY_POLICY;
 
 function explicitWorkspaceDoesNotBecomeProjectIdentity(): void {
   const context = resolveContextFromRegistry(

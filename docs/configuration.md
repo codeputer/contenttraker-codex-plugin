@@ -10,21 +10,23 @@ Configuration describes non-secret policy and host capabilities. Credentials nev
 | Delegated flow | `CONTENTTRAKER_DELEGATED_FLOW` | `auto`, `authorization-code`, `device-code` | `auto` |
 | Browser interaction | `CONTENTTRAKER_BROWSER_MODE` | `auto`, `system`, `manual`, `wsl-native` | `auto` |
 | Credential provider | `CONTENTTRAKER_CREDENTIAL_STORE` | `auto`, `windows-credential-manager`, `macos-keychain`, `linux-secret-service`, `memory` | `auto` |
-| Delegated profile | `CONTENTTRAKER_CREDENTIAL_PROFILE` | 1-64 letters, numbers, dots, underscores, or hyphens | `default` |
-| Required user | `CONTENTTRAKER_REQUIRED_USER_EMAIL` | Case-insensitive exact email policy, for example `operator@example.org` | Unset |
+| Delegated profile | `CONTENTTRAKER_CREDENTIAL_PROFILE` | 1-64 letters, numbers, dots, underscores, or hyphens | `default`; packaged plugin requires a named value |
+| Required user | `CONTENTTRAKER_REQUIRED_USER_EMAIL` | Case-insensitive exact email policy, for example `operator@example.org` | Unset; packaged plugin requires a value |
+| Require identity policy | `CONTENTTRAKER_REQUIRE_IDENTITY_POLICY` | `true`, `false` | `true` in the packaged plugin |
 
-The marketplace manifest fixes only the safe ContentTraker target default, `staging`. It does not force an authentication, browser, credential, workspace, customer, or user choice.
+The marketplace manifest requires a host-owned identity policy but does not contain a profile, email, credential, workspace, customer, or user value. Its `env_vars` allowlist forwards supported non-secret configuration from the process that launches Codex. The adapter itself defaults the ContentTraker target to `staging`; an explicit forwarded environment may select `production`, which remains read-only unless its separate write policy is enabled.
 
 ## Precedence
 
 1. Validate the ContentTraker target independently from the host profile.
-2. Use an explicit runtime profile when it agrees with detected host facts; otherwise return `invalid`.
-3. With authentication `auto`, choose workload OAuth for container or CI evidence and delegated OAuth for other hosts.
-4. An explicit `delegated` or `workload` value overrides automatic authentication selection but does not make a missing provider available.
-5. Delegated mode validates `CONTENTTRAKER_DELEGATED_FLOW`. Its `auto` value keeps authorization code + PKCE for browser-capable hosts and selects device code only for manual/headless interaction when live metadata advertises it.
-6. Apply the explicit browser and credential-provider choices, or capability-probe their `auto` values.
-7. Before interaction, live OAuth metadata must validate the target resource, authority, endpoints, grants, PKCE, public client, bearer method, and scopes.
-8. Any missing layer returns `blocked` or `invalid`; the plugin does not fall back to a raw token, browser cookie, connector session, plaintext file, or Windows browser bridge from WSL.
+2. Validate the durable credential profile and exact required-user policy. The packaged plugin stops before credential restoration when the profile is missing/default or the required email is absent.
+3. Use an explicit runtime profile when it agrees with detected host facts; otherwise return `invalid`.
+4. With authentication `auto`, choose workload OAuth for container or CI evidence and delegated OAuth for other hosts.
+5. An explicit `delegated` or `workload` value overrides automatic authentication selection but does not make a missing provider available.
+6. Delegated mode validates `CONTENTTRAKER_DELEGATED_FLOW`. Its `auto` value keeps authorization code + PKCE for browser-capable hosts and selects device code only for manual/headless interaction when live metadata advertises it.
+7. Apply the explicit browser and credential-provider choices, or capability-probe their `auto` values.
+8. Before interaction, live OAuth metadata must validate the target resource, authority, endpoints, grants, PKCE, public client, bearer method, and scopes.
+9. Any missing layer returns `blocked` or `invalid`; the plugin does not fall back to a raw token, browser cookie, connector session, plaintext file, or Windows browser bridge from WSL.
 
 Business API tools never initiate interactive authorization. Call `begin_contenttraker_login` and `poll_contenttraker_login`; `get_current_user` returns `authentication_required` when no credential can be restored.
 
