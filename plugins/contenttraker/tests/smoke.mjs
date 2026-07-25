@@ -335,7 +335,11 @@ try {
     },
   });
 
-  assert.equal(unconfigured.status, "unconfigured");
+  assert.equal(
+    unconfigured.status,
+    "unconfigured",
+    `Unexpected unconfigured context result: ${JSON.stringify(unconfigured)}`,
+  );
   assert.equal(unconfigured.registry.exists, false);
   assert.equal(unconfigured.registry.environment, "staging");
   assert.equal(unconfigured.registry.environmentConfigured, false);
@@ -691,7 +695,11 @@ try {
     },
   });
 
-  assert.equal(productionWithoutScopedConfig.status, "unconfigured");
+  assert.equal(
+    productionWithoutScopedConfig.status,
+    "unconfigured",
+    `Unexpected production context result: ${JSON.stringify(productionWithoutScopedConfig)}`,
+  );
   assert.equal(productionWithoutScopedConfig.registry.environment, "production");
   assert.equal(productionWithoutScopedConfig.registry.environmentConfigured, false);
   assert.equal(productionWithoutScopedConfig.api.configured, true);
