@@ -1,25 +1,17 @@
 import type { ContentTrakerApiClient } from "../contenttraker-api-client.js";
-import {
-  loadWorkspaceRegistry,
-  resolveContextFromRegistry,
-} from "../workspace-registry.js";
+import { resolveOperationContext } from "../context-resolution.js";
 import type { ContentTrakerRequestSecurityContext, ResolveContextInput, ResolveContextResult } from "../types.js";
 
-export function resolveContentTrakerContext(
+export async function resolveContentTrakerContext(
   input: ResolveContextInput,
   apiClient: ContentTrakerApiClient,
   securityContext: ContentTrakerRequestSecurityContext,
-): ResolveContextResult {
+): Promise<ResolveContextResult> {
   const api = apiClient.getStatus(securityContext);
-  const environment = api.environmentProfile.name;
-  const registry = loadWorkspaceRegistry(environment);
-  const resolvedContext = resolveContextFromRegistry(input, registry);
-  const conflict = resolvedContext?.source === "workspace-conflict"
-    ? resolvedContext.workspaceConflict
-    : undefined;
-  const selectedContext = conflict ? undefined : resolvedContext;
+  const resolution = await resolveOperationContext(input, apiClient, securityContext);
+  const selectedContext = resolution.selectedContext;
   const diagnostics: string[] = [
-    ...registry.errors,
+    ...resolution.diagnostics,
     ...api.writePolicy.diagnostics,
   ];
 
@@ -31,7 +23,7 @@ export function resolveContentTrakerContext(
 
   if (!api.configured) {
     diagnostics.push(
-      environment === "production"
+      api.environmentProfile.name === "production"
         ? "CONTENTTRAKER_PRODUCTION_API_BASE_URL is not configured; production API calls are disabled."
         : "CONTENTTRAKER_STAGING_API_BASE_URL or CONTENTTRAKER_API_BASE_URL is not configured; API calls are disabled.",
     );
@@ -45,33 +37,33 @@ export function resolveContentTrakerContext(
         : "ContentTraker delegated OAuth authentication is not configured.");
   }
 
-  if (conflict) {
-    diagnostics.push(
-      "The explicit workspace conflicts with the exact repository/project registry mapping. Select the intended workspace explicitly and update the local registry separately if that mapping is stale.",
-    );
-  } else if (!registry.exists && !selectedContext) {
-    diagnostics.push("No workspace registry was found; context mapping is unconfigured.");
-  } else if (!registry.loaded) {
+  if (!resolution.blocked && !resolution.registry.exists && !selectedContext) {
+    diagnostics.push("No worktree marker or workspace registry mapping was found; context is unconfigured.");
+  } else if (!resolution.blocked && !resolution.registry.loaded) {
     diagnostics.push("Workspace registry exists but could not be loaded.");
-  } else if (!registry.environmentConfigured) {
+  } else if (!resolution.blocked && !resolution.registry.environmentConfigured) {
     diagnostics.push(
-      environment
-        ? `Workspace registry loaded but has no '${environment}' environment mapping.`
+      api.environmentProfile.name
+        ? `Workspace registry loaded but has no '${api.environmentProfile.name}' environment mapping.`
         : "Workspace registry loaded but no valid environment is selected.",
     );
-  } else if (!selectedContext) {
+  } else if (!resolution.blocked && !selectedContext) {
     diagnostics.push(
-      environment
-        ? `Workspace registry loaded for '${environment}' but no mapping matched the request.`
+      api.environmentProfile.name
+        ? `Workspace registry loaded for '${api.environmentProfile.name}' but no mapping matched the request.`
         : "Workspace registry loaded but no mapping matched the request.",
     );
   }
 
-  const status = conflict
-    ? "workspace_conflict"
-    : selectedContext?.source === "explicit-workspace"
+  const status = resolution.blocked
+    ? resolution.reset
+      ? "reset"
+      : resolution.failureStatus === "failed"
+        ? "failed"
+        : "blocked"
+    : selectedContext?.source === "explicit-workspace" || selectedContext?.source === "worktree-marker"
       ? "resolved"
-      : !registry.exists || !registry.environmentConfigured
+      : !resolution.registry.exists || !resolution.registry.environmentConfigured
         ? "unconfigured"
         : selectedContext?.source === "registry-project"
           ? "resolved"
@@ -82,16 +74,24 @@ export function resolveContentTrakerContext(
   return {
     status,
     selectedContext,
-    workspaceCandidates: conflict,
     registry: {
-      path: registry.path,
-      exists: registry.exists,
-      loaded: registry.loaded,
-      environment: registry.environment,
-      environmentConfigured: registry.environmentConfigured,
-      documentVersion: registry.documentVersion,
-      projectCount: registry.projectCount,
+      path: resolution.registry.path,
+      exists: resolution.registry.exists,
+      loaded: resolution.registry.loaded,
+      environment: resolution.registry.environment,
+      environmentConfigured: resolution.registry.environmentConfigured,
+      documentVersion: resolution.registry.documentVersion,
+      projectCount: resolution.registry.projectCount,
     },
+    worktree: resolution.marker ? {
+      path: resolution.marker.path,
+      exists: resolution.marker.exists,
+      loaded: resolution.marker.loaded,
+      bindingFound: Boolean(resolution.marker.binding),
+      resetActive: Boolean(resolution.marker.reset),
+      blocked: resolution.marker.blocked,
+    } : undefined,
+    correlationIds: resolution.correlationIds,
     api,
     diagnostics,
   };

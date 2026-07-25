@@ -5,6 +5,7 @@ import type {
   ContentTrakerEnvironment,
   ContentTrakerContext,
   RegistryProjectMapping,
+  RegistryMappingRemovalResult,
   RegistrySnapshot,
   RegistryUpsertResult,
   ResolveContextInput,
@@ -74,14 +75,16 @@ export function resolveContextFromRegistry(
   input: ResolveContextInput,
   registry: RegistrySnapshot,
 ): ContentTrakerContext | undefined {
-  const explicit = input.workspaceId?.trim() || input.workspaceName?.trim()
+  const explicit = input.workspaceId?.trim() || input.workspaceKey?.trim() || input.workspaceName?.trim()
     ? {
         environment: registry.environment,
         workspaceId: input.workspaceId?.trim() || undefined,
+        workspaceKey: input.workspaceKey?.trim() || undefined,
         workspaceName: input.workspaceName?.trim() || undefined,
         source: "explicit-workspace" as const,
       }
     : undefined;
+  if (explicit) return explicit;
   if (!registry.loaded || !registry.document) {
     const registryCouldHideAProjectConflict = registry.exists
       && Boolean(input.projectName?.trim() || input.repositoryRoot?.trim());
@@ -102,36 +105,8 @@ export function resolveContextFromRegistry(
       projectId: match.contentTrakerProjectId,
       source: "registry-project" as const,
     };
-    if (explicit && workspaceCandidatesConflict(explicit, mapped)) {
-      return {
-        environment: registry.environment,
-        source: "workspace-conflict",
-        workspaceConflict: {
-          explicit: {
-            workspaceId: explicit.workspaceId,
-            workspaceName: explicit.workspaceName,
-            source: "explicit-workspace",
-          },
-          registry: {
-            workspaceId: mapped.workspaceId,
-            workspaceName: mapped.workspaceName,
-            source: "registry-project",
-          },
-        },
-      };
-    }
-    if (explicit) {
-      return {
-        ...mapped,
-        workspaceId: explicit.workspaceId ?? mapped.workspaceId,
-        workspaceName: explicit.workspaceName ?? mapped.workspaceName,
-        source: "explicit-workspace",
-      };
-    }
     return mapped;
   }
-
-  if (explicit) return explicit;
 
   const defaults = registry.environmentDocument?.defaults;
   if (defaults?.workspaceName || defaults?.workspaceId || defaults?.projectName || defaults?.projectId) {
@@ -162,7 +137,7 @@ export function upsertRegistryMapping(
   const projects = Array.isArray(environmentDocument.projects) ? [...environmentDocument.projects] : [];
   const nextMapping: RegistryProjectMapping = {
     projectName: input.projectName,
-    repositoryRoot: path.resolve(input.repositoryRoot),
+    repositoryRoot: canonicalFilesystemPath(input.repositoryRoot),
     workspaceName: input.workspaceName,
     workspaceId: input.workspaceId,
     contentTrakerProjectName: input.contentTrakerProjectName,
@@ -243,17 +218,61 @@ function projectMatches(input: ResolveContextInput, project: RegistryProjectMapp
   return projectNameMatches ?? repositoryMatches ?? false;
 }
 
-function workspaceCandidatesConflict(
-  explicit: Pick<ContentTrakerContext, "workspaceId" | "workspaceName">,
-  mapped: Pick<ContentTrakerContext, "workspaceId" | "workspaceName">,
-): boolean {
-  if (explicit.workspaceId) {
-    return !mapped.workspaceId || !equals(explicit.workspaceId, mapped.workspaceId);
+export function removeRegistryMappingsForWorktree(
+  environment: ContentTrakerEnvironment,
+  repositoryRoot: string,
+  registryPath = resolveRegistryPath(),
+): RegistryMappingRemovalResult {
+  if (!fs.existsSync(registryPath)) {
+    return {
+      path: registryPath,
+      environment,
+      loaded: false,
+      removedCount: 0,
+      remainingProjectCount: 0,
+      diagnostics: ["No workspace registry exists; no registry mapping was removed."],
+    };
   }
-  if (explicit.workspaceName) {
-    return !mapped.workspaceName || !equals(explicit.workspaceName, mapped.workspaceName);
+
+  try {
+    const document = normalizeRegistryDocument(
+      JSON.parse(fs.readFileSync(registryPath, "utf8")) as WorkspaceRegistryDocument,
+    );
+    const environmentDocument = document.environments[environment] ?? { projects: [] };
+    const projects = Array.isArray(environmentDocument.projects) ? environmentDocument.projects : [];
+    const normalizedRoot = normalizePath(repositoryRoot);
+    const remaining = projects.filter((project) =>
+      !project.repositoryRoot || normalizePath(project.repositoryRoot) !== normalizedRoot);
+    const removedCount = projects.length - remaining.length;
+    environmentDocument.projects = remaining;
+    document.environments[environment] = environmentDocument;
+    if (removedCount > 0) writeRegistryDocument(registryPath, document);
+
+    return {
+      path: registryPath,
+      environment,
+      loaded: true,
+      removedCount,
+      remainingProjectCount: remaining.length,
+      diagnostics: [
+        removedCount > 0
+          ? `Removed ${removedCount} exact registry mapping(s) for this worktree and environment.`
+          : "No exact registry mapping matched this worktree and environment.",
+        "Environment defaults were preserved; the worktree reset tombstone suppresses them locally.",
+      ],
+    };
+  } catch (error) {
+    return {
+      path: registryPath,
+      environment,
+      loaded: false,
+      removedCount: 0,
+      remainingProjectCount: 0,
+      diagnostics: [
+        `Workspace registry could not be updated: ${error instanceof Error ? error.message : String(error)}`,
+      ],
+    };
   }
-  return false;
 }
 
 function selectEnvironmentDocument(
@@ -337,5 +356,15 @@ function equals(left: string, right: string | undefined): boolean {
 }
 
 function normalizePath(value: string): string {
-  return path.resolve(value).toLocaleLowerCase();
+  const canonical = canonicalFilesystemPath(value);
+  return process.platform === "win32" ? canonical.toLocaleLowerCase() : canonical;
+}
+
+function canonicalFilesystemPath(value: string): string {
+  const resolved = path.resolve(value);
+  try {
+    return fs.realpathSync.native(resolved);
+  } catch {
+    return resolved;
+  }
 }

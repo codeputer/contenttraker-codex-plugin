@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.0 - 2026-07-24
+
+- Adds human-confirmed ContentTraker workspace and optional project context stored locally per worktree.
+- Adds `confirm_contenttraker_context` and `reset_contenttraker_context`, with packaged select and reset skills.
+- Validates durable context against the environment, repository, and live authorization while preserving credentials and remote assets during reset.
+
 ## 0.2.0 - 2026-07-21
 
 - Adds an independent host runtime capability model and unauthenticated `inspect_runtime_capabilities` tool for Windows, macOS, Linux, WSL, headless, container, and CI profile selection.

@@ -1,15 +1,26 @@
 import type { ContentTrakerApiClient } from "../contenttraker-api-client.js";
+import { resolveOperationContext } from "../context-resolution.js";
 import type { ContentTrakerRequestSecurityContext, UpdateDigitalAssetInput, UpdateDigitalAssetResult } from "../types.js";
-import { loadWorkspaceRegistry, resolveContextFromRegistry } from "../workspace-registry.js";
 
 export async function updateDigitalAsset(
   input: UpdateDigitalAssetInput,
   apiClient: ContentTrakerApiClient,
   securityContext: ContentTrakerRequestSecurityContext,
 ): Promise<UpdateDigitalAssetResult> {
-  const api = apiClient.getStatus(securityContext);
-  const registry = loadWorkspaceRegistry(api.environmentProfile.name);
-  const selectedContext = resolveContextFromRegistry(input, registry);
-  const result = await apiClient.updateDigitalAsset(input, selectedContext, securityContext);
-  return { ...result, diagnostics: [...registry.errors, ...result.diagnostics] };
+  const resolution = await resolveOperationContext(input, apiClient, securityContext);
+  if (resolution.blocked) {
+    return {
+      status: resolution.failureStatus ?? "blocked",
+      api: apiClient.getStatus(securityContext),
+      selectedContext: resolution.selectedContext,
+      contextCorrelationIds: resolution.correlationIds,
+      diagnostics: resolution.diagnostics,
+    };
+  }
+  const result = await apiClient.updateDigitalAsset(input, resolution.selectedContext, securityContext);
+  return {
+    ...result,
+    contextCorrelationIds: resolution.correlationIds,
+    diagnostics: [...resolution.diagnostics, ...result.diagnostics],
+  };
 }

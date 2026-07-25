@@ -1,24 +1,21 @@
 import type { ContentTrakerApiClient } from "../contenttraker-api-client.js";
 import type { ApiContractResult, ContentTrakerRequestSecurityContext, ResolveContextInput } from "../types.js";
-import {
-  loadWorkspaceRegistry,
-  resolveContextFromRegistry,
-} from "../workspace-registry.js";
+import { resolveOperationContext } from "../context-resolution.js";
 
-export function inspectContentTrakerApiContract(
+export async function inspectContentTrakerApiContract(
   input: ResolveContextInput,
   apiClient: ContentTrakerApiClient,
   securityContext: ContentTrakerRequestSecurityContext,
-): ApiContractResult {
-  const api = apiClient.getStatus(securityContext);
-  const registry = loadWorkspaceRegistry(api.environmentProfile.name);
-  const selectedContext = resolveContextFromRegistry(input, registry);
-  const result = apiClient.inspectApiContract(selectedContext, securityContext);
+): Promise<ApiContractResult> {
+  const resolution = await resolveOperationContext(input, apiClient, securityContext);
+  const result = apiClient.inspectApiContract(resolution.selectedContext, securityContext);
 
   return {
     ...result,
+    status: resolution.blocked ? "blocked" : result.status,
+    contextCorrelationIds: resolution.correlationIds,
     diagnostics: [
-      ...registry.errors,
+      ...resolution.diagnostics,
       ...result.diagnostics,
     ],
   };

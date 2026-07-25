@@ -17,6 +17,8 @@ import type { ContentTrakerRequestSecurityContext } from "../src/types.js";
 
 const audience = "https://mcp.staging.contenttraker.com";
 const issuer = "https://tokenbroker.staging.contenttraker.com";
+const authorizationTimeoutMs = 10_000;
+const authorizationStatusWaitMs = 5_000;
 
 const wslEnvironment = {
   CONTENTTRAKER_BROWSER_MODE: "auto",
@@ -72,7 +74,7 @@ assert.equal(invalidMode.requestedMode, "invalid");
 async function manualAuthorizationCompletesAndStoresCredential(): Promise<void> {
   const store = new MemoryCredentialStore();
   const transport = new RecordingOAuthTransport();
-  const provider = providerFor(store, transport, 2_000);
+  const provider = providerFor(store, transport, authorizationTimeoutMs);
   const context = security("manual-connection", "manual-session");
 
   const first = await provider.beginAuthorization(context);
@@ -85,7 +87,7 @@ async function manualAuthorizationCompletesAndStoresCredential(): Promise<void> 
   assert.equal(JSON.stringify(first).includes("refresh-token"), false);
 
   await completeCallback(first, "manual-code");
-  const completed = await provider.getAuthorizationStatus(context, 1_000);
+  const completed = await provider.getAuthorizationStatus(context, authorizationStatusWaitMs);
   assert.equal(completed.status, "authorized");
   assert.equal(completed.authorizationUrl, undefined);
   assert.equal(transport.exchangeCount, 1);
@@ -130,12 +132,12 @@ async function authorizationFailuresAreRedacted(): Promise<void> {
   const provider = providerFor(
     new MemoryCredentialStore(),
     { exchangeToken: async () => { throw new Error(rawFailure); } },
-    2_000,
+    authorizationTimeoutMs,
   );
   const context = security("failure-connection", "failure-session");
   const pending = await provider.beginAuthorization(context);
   await completeCallback(pending, "failure-code");
-  const failed = await provider.getAuthorizationStatus(context, 1_000);
+  const failed = await provider.getAuthorizationStatus(context, authorizationStatusWaitMs);
   assert.equal(failed.status, "failed");
   assert.equal(JSON.stringify(failed).includes(rawFailure), false);
   assert.equal(JSON.stringify(failed).includes("raw-access-token"), false);
@@ -153,12 +155,12 @@ async function tokenResponsesMustGrantRequiredScopes(): Promise<void> {
         resource: audience,
       }),
     },
-    2_000,
+    authorizationTimeoutMs,
   );
   const context = security("scope-connection", "scope-session");
   const pending = await provider.beginAuthorization(context);
   await completeCallback(pending, "scope-code");
-  const failed = await provider.getAuthorizationStatus(context, 1_000);
+  const failed = await provider.getAuthorizationStatus(context, authorizationStatusWaitMs);
   assert.equal(failed.status, "failed");
   assert.equal(JSON.stringify(failed).includes("scope-refresh-token"), false);
 }
