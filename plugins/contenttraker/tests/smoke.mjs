@@ -299,6 +299,8 @@ try {
     env: {
       CONTENTTRAKER_RUNTIME_PROFILE: "headless",
       CONTENTTRAKER_ENVIRONMENT: "staging",
+      CONTENTTRAKER_AUTH_MODE: "delegated",
+      CONTENTTRAKER_CREDENTIAL_STORE: "memory",
     },
     arguments: {},
   });
