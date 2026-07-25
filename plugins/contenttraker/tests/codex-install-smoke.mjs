@@ -205,8 +205,15 @@ function containsDirectoryNamed(root, expectedName) {
 }
 
 function isDescendantPath(parentPath, childPath) {
-  const relative = path.relative(path.resolve(parentPath), path.resolve(childPath));
+  const canonicalParent = canonicalPath(parentPath);
+  const canonicalChild = canonicalPath(childPath);
+  const relative = path.relative(canonicalParent, canonicalChild);
   return relative !== "" && !relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative);
+}
+
+function canonicalPath(candidatePath) {
+  const canonical = fs.realpathSync.native(candidatePath);
+  return process.platform === "win32" ? canonical.toLowerCase() : canonical;
 }
 
 function runConfiguredAdapter(adapter, installedRoot) {
