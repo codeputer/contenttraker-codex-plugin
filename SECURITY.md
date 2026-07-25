@@ -6,9 +6,9 @@ Only the latest published release is supported. Installations should pin a revie
 
 ## Release artifact and build dependencies
 
-Marketplace installations execute the committed `dist/server.mjs` bundle and do not install npm packages. CI requires a clean production-dependency audit and rejects a bundle containing Hono's HTTP/static-server modules.
+Marketplace installations execute the committed `dist/server.mjs` bundle and do not install npm packages. CI rebuilds that exact bundle, inspects its esbuild dependency graph, correlates bundled packages with the complete npm audit report, and fails when an embedded dependency has a known advisory. It also verifies the extracted marketplace artifact without `node_modules`.
 
-The MCP SDK used to build version 0.3.0 currently declares `@hono/node-server` in its development dependency tree. npm reports an advisory for that package's Windows static-file serving path. This plugin is a local stdio adapter across its supported host profiles, does not import or use that HTTP/static-file server, and does not include it in the released bundle. The dependency should still be updated when the MCP SDK provides a Node 18-compatible fixed dependency path or the supported host baseline moves to Node 20.
+Version 0.4.0 pins embedded `fast-uri` to patched version 3.1.4 or later. The MCP SDK still declares `@hono/node-server` in its development dependency tree, but this local stdio plugin does not import or bundle Hono's HTTP/static-server modules. Release validation rejects the artifact if that boundary changes.
 
 ## Reporting a vulnerability
 

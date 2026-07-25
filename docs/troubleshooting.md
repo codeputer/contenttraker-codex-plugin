@@ -50,6 +50,10 @@ Use `$contenttraker-select`, `$contenttraker-reset`, or plain language. Native `
 
 The exact selected workspace ID/key was absent from the authenticated user's `/workspaces` response. No write was sent. Verify `get_current_user`, list workspaces again, and do not substitute a project name or another cached identity.
 
-## Upgrading from v0.1.2
+## Migrating to the consolidated v0.4.0 plugin
 
-Version 0.2.0 uses a new keyring namespace and does not enumerate old session-derived entries. Complete one explicit login after upgrade. Remove old `ContentTraker Codex Adapter` entries only through the operating system credential UI if local policy requires physical deletion.
+Run `codex plugin list --json` before changing the installation. Public releases use `contenttraker@contenttraker`; a separate older private/local package used `contenttraker-codex@contenttraker`. Remove every installed ContentTraker identity that the list actually reports before removing the `contenttraker` marketplace, because both identities register the same `contenttraker-codex-adapter` MCP key.
+
+Add the marketplace again at `v0.4.0`, install only `contenttraker@contenttraker`, and start a new Codex task. The final plugin list must contain exactly that one ContentTraker plugin at version 0.4.0.
+
+Plugin and marketplace removal do not delete operating-system keyring entries or remote assets. Version 0.4.0 uses the identity-bound v2 keyring namespace and never enumerates old session-derived entries, so complete one explicit login after migration. Remove legacy `ContentTraker Codex Adapter` credentials only through the operating-system credential UI when local retention policy requires physical deletion.
