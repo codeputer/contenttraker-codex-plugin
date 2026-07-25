@@ -1,20 +1,21 @@
 # Cross-platform verification matrix
 
-Evidence snapshot: 2026-07-21. Implementation commits are local and unpushed, so the new GitHub Actions matrix has not yet produced remote run evidence.
+Evidence snapshot: 2026-07-25. Consolidated release candidate `0.4.0` is under release review in issue [#15](https://github.com/codeputer/contenttraker-codex-plugin/issues/15). The prior consolidated `development` matrix passed in [run 30159208839](https://github.com/codeputer/contenttraker-codex-plugin/actions/runs/30159208839); the final release commit still requires its own green matrix.
 
 | Requirement | Current evidence | Status |
 | --- | --- | --- |
-| Portable production bundle | Deterministic SHA256 `D0AE85DC192B3F16B49F79C3E1091A0801F8DF0A1BC04A3AC29C698BB8E82E10`; production startup exposes 25 expected tools; forbidden runtime, credential-config, and internal-test markers are absent | Verified locally |
+| Portable production bundle | Deterministic SHA256 `947B6288912DEB7E2D887D067A6B3ED24DDFCA9EC7D69AA0BAD3BF2F48FBD448`; a clean extracted marketplace artifact with no `node_modules` starts through the exact `.mcp.json` command and exposes all 27 tools; the actual bundle dependency graph is audited | Verified locally; release CI pending (#15) |
+| Codex plugin discovery | Local marketplace installation registered `contenttraker@contenttraker` 0.4.0; a fresh ephemeral Codex process exposed `mcp__contenttraker_codex_adapter`, counted 27 tools, and called `inspect_runtime_capabilities` with `ready` status | Verified locally; immutable-tag reinstall pending (#15) |
 | Windows desktop credential provider | Native Windows Credential Manager set/get/delete round trip passed; the randomized temporary entry was deleted | Verified locally |
-| Windows Node 18 | Workflow job is defined on `windows-latest` with Node 18 but has not run from this unpushed branch | Pending CI (#9) |
-| macOS desktop and Keychain | Capability, command transport, redaction, and restoration fixtures pass; Node 18 and native Keychain workflow steps are defined but unrun | Pending CI/native evidence (#9) |
-| Linux desktop | Capability and Secret Service fixtures pass; WSLg Firefox and GNOME Keyring pass live; Ubuntu Node 18 workflow is defined but unrun; no separate non-WSL desktop evidence has been captured | Partial; pending CI/native evidence (#9) |
+| Windows Node 18 | Consolidated `development` workflow passed on `windows-latest`; the 0.4.0 artifact also passes locally on Windows | Prior CI and current local evidence; release CI pending (#15) |
+| macOS desktop and Keychain | Consolidated `development` workflow and native Keychain round trip passed on `macos-latest`; the final 0.4.0 commit requires the same matrix | Prior CI verified; release CI pending (#15) |
+| Linux desktop | Consolidated `development` workflow passed on Ubuntu; WSLg Firefox and GNOME Keyring passed live; no separate non-WSL desktop Secret Service evidence has been captured | Partial; release CI pending (#15) |
 | WSL / Linux Node 18 bundle | The committed bundle started under an isolated WSL Node `v18.19.1` host and exposed the expected tools | Verified locally |
 | Current isolated WSL capabilities | Ubuntu 24.04 has D-Bus, WSLg display, `secret-tool`, and GNOME Keyring; a randomized cross-process Secret Service set/get/delete round trip passed and removed its temporary entry; the plugin reports persistent `linux-secret-service` and cross-task restoration available | Keyring verified locally (#11) |
 | WSL-native delegated OAuth | Firefox `152.0.6-1` runs inside WSLg; the plugin selected `wsl-desktop` + `wsl-native`, launched PKCE authorization, and completed staging sign-in without Windows browser interoperability | Verified live (#11) |
 | Device authorization provider | Advertised/absent/malformed metadata, pending, slow-down, denial, expiry, cancellation, timeout, scope/resource binding, redaction, and delegated keyring persistence tests pass | Plugin side verified; server blocked (#12) |
 | Headless manual loopback | Manual URL, callback lifetime, cancellation, timeout, and redaction tests pass | Automated fixture verified |
-| Docker/Kubernetes/CI workload OAuth | Auto-selection fails closed and raw bearer configuration is removed; live metadata advertises no workload grant; local Docker engine is stopped | Workload contract/provider blocked (#13); local container run pending (#9) |
+| Docker/Kubernetes/CI workload OAuth | Consolidated Linux-container workflow passed the fail-closed runtime and portable artifact checks; auto-selection rejects raw bearer configuration, while live metadata advertises no workload grant | Artifact/runtime verified; workload contract/provider blocked (#13) |
 | Explicit ephemeral container | Delegated + memory selection and non-restoration behavior are tested | Automated fixture verified |
 | Cross-task restoration | Durable identity-policy binding, refresh rotation, new-task rediscovery, stale cleanup, and cross-process lock tests pass; a new WSL adapter process restored/refreshed a test profile without browser interaction | Verified live and by fixtures (#11) |
 | Concurrent users and refreshes | Session isolation, caller verification, single-flight refresh, rotation races, revocation, audience binding, and redaction tests pass | Automated fixture verified |
@@ -23,6 +24,6 @@ Evidence snapshot: 2026-07-21. Implementation commits are local and unpushed, so
 | Authorized workspace isolation | Live `list_workspaces` returned only the caller's authorized workspace set; customer workspace names are not recorded here | Verified live (#11) |
 | Workspace precedence and conflicts | Neutral fixtures verify explicit ID, explicit name, exact project mapping, default selection, `workspace_conflict`, unauthorized workspace rejection, and no write on failed resolution | Automated fixture verified |
 | Live API readiness | `/me`, authorized workspace matching, and the optional workspace-project endpoint returned HTTP 200 after removing the false local-to-remote project fallback | Verified live (#11) |
-| Approval-gated asset workflow | Contract and mock API tests pass, including idempotent draft creation after identity and exact workspace verification; no live asset was created for this release preparation | Live write not authorized |
+| Approval-gated asset workflow | Contract and mock API tests pass, including idempotent draft creation after identity and exact workspace verification. The installed adapter authenticated a CAPIC-only identity during release verification and correctly stopped before the unrelated NRRCC target; no live asset write was attempted | Correct identity required for live staging verification (#15) |
 
-The epic is not complete while any required live or external row remains pending or blocked. Automated fixtures prove adapter behavior; they do not substitute for native host, authorization-server, identity, or workspace evidence.
+The release gate is not complete until the final commit passes the host/container matrix and the immutable tag is installed and verified. Automated fixtures prove adapter behavior; they do not substitute for native host, authorization-server, identity, or workspace evidence.

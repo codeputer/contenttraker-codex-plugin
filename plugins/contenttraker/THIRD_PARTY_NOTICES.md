@@ -1,6 +1,6 @@
 # Third-party notices
 
-The built adapter includes code from the following open-source packages. Exact upstream licence texts are packaged under `plugins/contenttraker/THIRD_PARTY_LICENSES`.
+The built adapter includes code from the following open-source packages. Exact upstream licence texts are included in `THIRD_PARTY_LICENSES`.
 
 - `@modelcontextprotocol/sdk` — MIT
 - `ajv` — MIT

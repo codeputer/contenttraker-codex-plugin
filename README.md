@@ -22,10 +22,10 @@ Windows browser interoperability remains disabled inside WSL. On a headless host
 
 ## Install a reviewed release
 
-Version `0.3.0` is a prepared development candidate on top of the unpublished `0.2.0` release line. It is not available by tag until that release lineage is reviewed and published. After `v0.3.0` is published:
+The consolidated reviewed release uses the permanent plugin identity `contenttraker@contenttraker`. Install the immutable `v0.4.0` tag:
 
 ```bash
-codex plugin marketplace add https://github.com/codeputer/contenttraker-codex-plugin.git --ref v0.3.0
+codex plugin marketplace add https://github.com/codeputer/contenttraker-codex-plugin.git --ref v0.4.0
 codex plugin marketplace list
 codex plugin list
 codex plugin add contenttraker@contenttraker
@@ -139,16 +139,31 @@ Workspace names are runtime inputs. No customer identity, workspace, or project 
 
 ## Upgrade
 
-Codex treats the marketplace Git ref as a snapshot. A different `--ref` does not replace the installed snapshot in place; remove the plugin and marketplace entry, then add the new ref and restart Codex:
+Codex treats the marketplace Git ref as a snapshot. A different `--ref` does not replace the installed snapshot in place.
+
+First run `codex plugin list`. Remove every installed ContentTraker plugin identity that it reports before removing the marketplace:
 
 ```bash
 codex plugin remove contenttraker@contenttraker
+```
+
+Older private/local installations used a separate legacy identity. Remove that identity instead, or remove both identities if both are present:
+
+```bash
+codex plugin remove contenttraker-codex@contenttraker
+```
+
+Then replace the marketplace snapshot and install the permanent public identity:
+
+```bash
 codex plugin marketplace remove contenttraker
-codex plugin marketplace add https://github.com/codeputer/contenttraker-codex-plugin.git --ref v0.3.0
+codex plugin marketplace add https://github.com/codeputer/contenttraker-codex-plugin.git --ref v0.4.0
 codex plugin add contenttraker@contenttraker
 ```
 
 Start a new Codex session after upgrading.
+
+Plugin and marketplace removal preserve operating-system keyring credentials, worktree context markers, registry mappings, and all remote ContentTraker assets. Do not call `logout_contenttraker` during this migration unless credential deletion is separately intended.
 
 ## Remove
 

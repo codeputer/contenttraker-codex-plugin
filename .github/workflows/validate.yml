@@ -26,7 +26,6 @@ jobs:
           cache: npm
           cache-dependency-path: plugins/contenttraker/package-lock.json
       - run: npm ci
-      - run: npm audit --omit=dev
       - run: npm test
       - name: Verify Windows Credential Manager round trip
         if: runner.os == 'Windows'
@@ -38,7 +37,14 @@ jobs:
         run: npm run native-credential-store
         env:
           CONTENTTRAKER_EXPECT_NATIVE_CREDENTIAL_STORE: macos-keychain
-      - run: npm run release-artifact
+      - name: Verify extracted artifact and audit bundled dependencies
+        run: npm run release-artifact
+        env:
+          CONTENTTRAKER_EXPECT_RUNTIME_STATUS: blocked
+      - name: Verify Codex marketplace registration and installed adapter
+        run: npm run codex-install-smoke
+        env:
+          CONTENTTRAKER_EXPECT_RUNTIME_STATUS: blocked
       - run: git diff --exit-code -- dist/server.mjs package-lock.json
 
   container:
@@ -56,7 +62,13 @@ jobs:
           apt-get install -y --no-install-recommends git ca-certificates
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - run: npm ci
-      - run: npm audit --omit=dev
       - run: npm test
-      - run: npm run release-artifact
+      - name: Verify extracted artifact and audit bundled dependencies
+        run: npm run release-artifact
+        env:
+          CONTENTTRAKER_EXPECT_RUNTIME_STATUS: blocked
+      - name: Verify Codex marketplace registration and installed adapter
+        run: npm run codex-install-smoke
+        env:
+          CONTENTTRAKER_EXPECT_RUNTIME_STATUS: blocked
       - run: git diff --exit-code -- dist/server.mjs package-lock.json

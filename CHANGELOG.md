@@ -1,6 +1,13 @@
 # Changelog
 
-## 0.3.0 - 2026-07-24
+## 0.4.0 - 2026-07-25
+
+- Consolidates the public adapter, cross-platform authentication, and durable per-worktree context work onto the single `development` release line.
+- Keeps the permanent public plugin identity `contenttraker@contenttraker` and documents migration from the separate legacy `contenttraker-codex@contenttraker` installation.
+- Pins the bundled `fast-uri` dependency to patched version 3.1.4 and adds release validation against the actual packaged adapter.
+- Verifies all packaged skills and the complete 27-tool MCP surface from an extracted plugin artifact without `node_modules`.
+
+## 0.3.0 - 2026-07-24 (unreleased development candidate)
 
 - Adds human-confirmed ContentTraker workspace and optional project context stored locally per worktree.
 - Adds `confirm_contenttraker_context` and `reset_contenttraker_context`, with packaged select and reset skills.

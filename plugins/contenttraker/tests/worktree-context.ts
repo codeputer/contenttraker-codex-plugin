@@ -819,7 +819,7 @@ function binding(
     confirmationState: "human-confirmed",
     confirmedAtUtc: "2026-07-24T20:00:00.000Z",
     pluginName: "contenttraker",
-    pluginVersion: "0.3.0-test",
+    pluginVersion: "test-version",
   };
 }
 
