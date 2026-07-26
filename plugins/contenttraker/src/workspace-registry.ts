@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { normalizeContentKeeperAliases } from "./contentkeeper-id.js";
 import type {
   ContentTrakerEnvironment,
   ContentTrakerContext,
@@ -75,10 +76,13 @@ export function resolveContextFromRegistry(
   input: ResolveContextInput,
   registry: RegistrySnapshot,
 ): ContentTrakerContext | undefined {
-  const explicit = input.workspaceId?.trim() || input.workspaceKey?.trim() || input.workspaceName?.trim()
+  const aliases = normalizeContentKeeperAliases(input);
+  if (aliases.diagnostic) return undefined;
+  const explicit = aliases.contentKeeperId || input.workspaceKey?.trim() || input.workspaceName?.trim()
     ? {
         environment: registry.environment,
-        workspaceId: input.workspaceId?.trim() || undefined,
+        contentKeeperId: aliases.contentKeeperId,
+        workspaceId: aliases.workspaceId,
         workspaceKey: input.workspaceKey?.trim() || undefined,
         workspaceName: input.workspaceName?.trim() || undefined,
         source: "explicit-workspace" as const,
@@ -97,27 +101,18 @@ export function resolveContextFromRegistry(
   const match = projects.find((project) => projectMatches(input, project));
 
   if (match) {
+    const mappedAliases = normalizeContentKeeperAliases(match);
+    if (mappedAliases.diagnostic || !mappedAliases.contentKeeperId) return undefined;
     const mapped = {
       environment: registry.environment,
       workspaceName: match.workspaceName,
-      workspaceId: match.workspaceId,
+      contentKeeperId: mappedAliases.contentKeeperId,
+      workspaceId: mappedAliases.workspaceId,
       projectName: match.contentTrakerProjectName,
       projectId: match.contentTrakerProjectId,
       source: "registry-project" as const,
     };
     return mapped;
-  }
-
-  const defaults = registry.environmentDocument?.defaults;
-  if (defaults?.workspaceName || defaults?.workspaceId || defaults?.projectName || defaults?.projectId) {
-    return {
-      environment: registry.environment,
-      workspaceName: defaults.workspaceName,
-      workspaceId: defaults.workspaceId,
-      projectName: defaults.projectName,
-      projectId: defaults.projectId,
-      source: "registry-default",
-    };
   }
 
   return undefined;
@@ -128,6 +123,24 @@ export function upsertRegistryMapping(
   registryPath = resolveRegistryPath(),
 ): RegistryUpsertResult {
   const environment = input.environment ?? "staging";
+  const aliases = normalizeContentKeeperAliases(input);
+  if (aliases.diagnostic || !aliases.contentKeeperId) {
+    return {
+      status: "blocked",
+      dryRun: Boolean(input.dryRun),
+      registry: {
+        path: registryPath,
+        existsBefore: fs.existsSync(registryPath),
+        documentVersion: 3,
+        environment,
+        projectCount: 0,
+      },
+      diagnostics: [
+        aliases.diagnostic
+          ?? "contentKeeperId is required for an exact repository registry mapping.",
+      ],
+    };
+  }
   const existsBefore = fs.existsSync(registryPath);
   const document = existsBefore
     ? normalizeRegistryDocument(JSON.parse(fs.readFileSync(registryPath, "utf8")) as WorkspaceRegistryDocument)
@@ -138,8 +151,9 @@ export function upsertRegistryMapping(
   const nextMapping: RegistryProjectMapping = {
     projectName: input.projectName,
     repositoryRoot: canonicalFilesystemPath(input.repositoryRoot),
+    contentKeeperId: aliases.contentKeeperId,
     workspaceName: input.workspaceName,
-    workspaceId: input.workspaceId,
+    workspaceId: aliases.workspaceId,
     contentTrakerProjectName: input.contentTrakerProjectName,
     contentTrakerProjectId: input.contentTrakerProjectId,
   };
@@ -166,7 +180,8 @@ export function upsertRegistryMapping(
   if (input.setDefault) {
     environmentDocument.defaults = {
       workspaceName: input.workspaceName,
-      workspaceId: input.workspaceId,
+      contentKeeperId: aliases.contentKeeperId,
+      workspaceId: aliases.workspaceId,
       projectName: input.contentTrakerProjectName,
       projectId: input.contentTrakerProjectId,
     };
@@ -184,14 +199,15 @@ export function upsertRegistryMapping(
     registry: {
       path: registryPath,
       existsBefore,
-      documentVersion: 2,
+      documentVersion: 3,
       environment,
       projectCount: projects.length,
     },
     selectedContext: {
       environment,
+      contentKeeperId: aliases.contentKeeperId,
       workspaceName: nextMapping.workspaceName,
-      workspaceId: nextMapping.workspaceId,
+      workspaceId: aliases.workspaceId,
       projectName: nextMapping.contentTrakerProjectName,
       projectId: nextMapping.contentTrakerProjectId,
       source: "registry-project",
@@ -200,22 +216,19 @@ export function upsertRegistryMapping(
       input.dryRun
         ? "Dry run only; registry file was not written."
         : "Local registry was updated; no ContentTraker API write was performed.",
+      input.setDefault
+        ? "The environment default is retained for diagnostics and migration only; business operations never route through it."
+        : "Business operations can use this mapping only when repositoryRoot matches exactly and live authorization succeeds.",
     ],
   };
 }
 
 function projectMatches(input: ResolveContextInput, project: RegistryProjectMapping): boolean {
-  const projectNameMatches = input.projectName
-    ? equals(input.projectName, project.projectName)
-    : undefined;
-  const repositoryMatches = input.repositoryRoot
-    ? Boolean(project.repositoryRoot
-      && normalizePath(input.repositoryRoot) === normalizePath(project.repositoryRoot))
-    : undefined;
-  if (projectNameMatches !== undefined && repositoryMatches !== undefined) {
-    return projectNameMatches && repositoryMatches;
-  }
-  return projectNameMatches ?? repositoryMatches ?? false;
+  return Boolean(
+    input.repositoryRoot
+    && project.repositoryRoot
+    && normalizePath(input.repositoryRoot) === normalizePath(project.repositoryRoot),
+  );
 }
 
 export function removeRegistryMappingsForWorktree(
@@ -283,7 +296,7 @@ function selectEnvironmentDocument(
     return undefined;
   }
 
-  if (document.version === 2) {
+  if (document.version === 2 || document.version === 3) {
     return document.environments?.[environment];
   }
 
@@ -297,9 +310,9 @@ function selectEnvironmentDocument(
   return undefined;
 }
 
-function emptyRegistryDocument(): WorkspaceRegistryDocument & { version: 2; environments: Record<ContentTrakerEnvironment, WorkspaceRegistryEnvironment> } {
+function emptyRegistryDocument(): WorkspaceRegistryDocument & { version: 3; environments: Record<ContentTrakerEnvironment, WorkspaceRegistryEnvironment> } {
   return {
-    version: 2,
+    version: 3,
     environments: {
       staging: { projects: [] },
       production: { projects: [] },
@@ -309,25 +322,25 @@ function emptyRegistryDocument(): WorkspaceRegistryDocument & { version: 2; envi
 
 function normalizeRegistryDocument(
   document: WorkspaceRegistryDocument,
-): WorkspaceRegistryDocument & { version: 2; environments: Record<ContentTrakerEnvironment, WorkspaceRegistryEnvironment> } {
-  if (document.version === 2) {
+): WorkspaceRegistryDocument & { version: 3; environments: Record<ContentTrakerEnvironment, WorkspaceRegistryEnvironment> } {
+  if (document.version === 2 || document.version === 3) {
     return {
-      version: 2,
+      version: 3,
       environments: {
-        staging: document.environments?.staging ?? { projects: [] },
-        production: document.environments?.production ?? { projects: [] },
+        staging: normalizeEnvironmentDocument(document.environments?.staging),
+        production: normalizeEnvironmentDocument(document.environments?.production),
       },
     };
   }
 
   if (document.version === 1) {
     return {
-      version: 2,
+      version: 3,
       environments: {
-        staging: {
+        staging: normalizeEnvironmentDocument({
           defaults: document.defaults,
           projects: document.projects ?? [],
-        },
+        }),
         production: { projects: [] },
       },
     };
@@ -358,6 +371,30 @@ function equals(left: string, right: string | undefined): boolean {
 function normalizePath(value: string): string {
   const canonical = canonicalFilesystemPath(value);
   return process.platform === "win32" ? canonical.toLocaleLowerCase() : canonical;
+}
+
+function normalizeEnvironmentDocument(
+  document: WorkspaceRegistryEnvironment | undefined,
+): WorkspaceRegistryEnvironment {
+  const defaults = document?.defaults;
+  const defaultAliases = normalizeContentKeeperAliases(defaults ?? {});
+  return {
+    defaults: defaults
+      ? {
+          ...defaults,
+          contentKeeperId: defaultAliases.contentKeeperId,
+          workspaceId: defaultAliases.workspaceId,
+        }
+      : undefined,
+    projects: (document?.projects ?? []).map((project) => {
+      const aliases = normalizeContentKeeperAliases(project);
+      return {
+        ...project,
+        contentKeeperId: aliases.contentKeeperId,
+        workspaceId: aliases.workspaceId,
+      };
+    }),
+  };
 }
 
 function canonicalFilesystemPath(value: string): string {

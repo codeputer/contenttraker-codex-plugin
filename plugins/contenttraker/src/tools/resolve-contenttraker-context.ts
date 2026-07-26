@@ -67,9 +67,7 @@ export async function resolveContentTrakerContext(
         ? "unconfigured"
         : selectedContext?.source === "registry-project"
           ? "resolved"
-          : selectedContext?.source === "registry-default"
-            ? "defaulted"
-            : "unresolved";
+          : "unresolved";
 
   return {
     status,

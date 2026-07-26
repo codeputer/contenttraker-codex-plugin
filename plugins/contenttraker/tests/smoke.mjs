@@ -73,6 +73,10 @@ const apiServer = https.createServer({ key: testCertificate.private, cert: testC
           id: "workspace-staging",
           name: "ContentTraker Staging",
         },
+        {
+          id: "workspace-production",
+          name: "ContentTraker Production",
+        },
       ],
     }));
     return;
@@ -84,6 +88,18 @@ const apiServer = https.createServer({ key: testCertificate.private, cert: testC
         {
           id: "project-staging",
           name: "Sample Project Staging",
+        },
+      ],
+    }));
+    return;
+  }
+
+  if (request.url === "/workspaces/workspace-production/projects") {
+    response.end(JSON.stringify({
+      projects: [
+        {
+          id: "project-production",
+          name: "Sample Project Production",
         },
       ],
     }));
@@ -260,6 +276,7 @@ try {
   const productionRegistryPath = path.join(tempRoot, "production-registry.json");
   const upsertRegistryPath = path.join(tempRoot, "upsert-registry.json");
   const workspaceOnlyRegistryPath = path.join(tempRoot, "workspace-only-registry.json");
+  const defaultOnlyRegistryPath = path.join(tempRoot, "default-only-registry.json");
 
   fs.writeFileSync(
     stagingRegistryPath,
@@ -284,6 +301,22 @@ try {
       null,
       2,
     ),
+  );
+
+  fs.writeFileSync(
+    defaultOnlyRegistryPath,
+    JSON.stringify({
+      version: 3,
+      environments: {
+        staging: {
+          defaults: {
+            contentKeeperId: "workspace-staging",
+            workspaceId: "workspace-staging",
+          },
+          projects: [],
+        },
+      },
+    }, null, 2),
   );
 
   fs.writeFileSync(
@@ -354,7 +387,7 @@ try {
 
   assert.equal(
     unconfigured.status,
-    "unconfigured",
+    "blocked",
     `Unexpected unconfigured context result: ${JSON.stringify(unconfigured)}`,
   );
   assert.equal(unconfigured.registry.exists, false);
@@ -366,6 +399,30 @@ try {
   assert.equal(unconfigured.api.tokenStrategy.configured, true);
   assert.equal(unconfigured.api.tokenStrategy.source, "injected-internal-test-provider");
   assert.equal(unconfigured.api.writePolicy.mode, "staging-writes-enabled");
+  assert.match(unconfigured.diagnostics.join(" "), /contentkeeper_selection_required/);
+
+  const defaultRejected = await callTool({
+    name: "resolve_contenttraker_context",
+    env: {
+      CONTENTTRAKER_CODEX_REGISTRY: defaultOnlyRegistryPath,
+    },
+  });
+  assert.equal(defaultRejected.status, "blocked");
+  assert.equal(defaultRejected.selectedContext, undefined);
+  assert.match(defaultRejected.diagnostics.join(" "), /contentkeeper_selection_required/);
+
+  const aliasMismatch = await callTool({
+    name: "resolve_contenttraker_context",
+    env: {
+      CONTENTTRAKER_CODEX_REGISTRY: missingRegistryPath,
+    },
+    arguments: {
+      contentKeeperId: "workspace-staging",
+      workspaceId: "workspace-production",
+    },
+  });
+  assert.equal(aliasMismatch.status, "blocked");
+  assert.match(aliasMismatch.diagnostics.join(" "), /content_keeper_alias_mismatch/);
 
   const currentUser = await callTool({
     name: "get_current_user",
@@ -414,12 +471,32 @@ try {
 
   assert.equal(staging.status, "resolved");
   assert.equal(staging.selectedContext.environment, "staging");
+  assert.equal(staging.contentKeeperId, "workspace-staging");
+  assert.equal(staging.selectedContext.contentKeeperId, "workspace-staging");
   assert.equal(staging.selectedContext.workspaceId, "workspace-staging");
   assert.equal(staging.registry.environmentConfigured, true);
   assert.equal(staging.registry.documentVersion, 2);
   assert.equal(staging.api.configured, true);
   assert.equal(staging.api.baseUrlSource, "CONTENTTRAKER_API_BASE_URL");
   assert.equal(staging.api.tokenStrategy.source, "injected-internal-test-provider");
+
+  const preferredExplicit = await callTool({
+    name: "resolve_contenttraker_context",
+    env: {
+      CONTENTTRAKER_CODEX_REGISTRY: missingRegistryPath,
+      CONTENTTRAKER_ENVIRONMENT: "staging",
+      CONTENTTRAKER_API_BASE_URL: apiBaseUrl,
+    },
+    arguments: {
+      context: {
+        source: "content-keeper",
+        contentKeeperId: "workspace-staging",
+      },
+    },
+  });
+  assert.equal(preferredExplicit.status, "resolved");
+  assert.equal(preferredExplicit.contentKeeperId, "workspace-staging");
+  assert.equal(preferredExplicit.workspaceId, "workspace-staging");
 
   const readiness = await callTool({
     name: "probe_contenttraker_api_readiness",
@@ -431,6 +508,7 @@ try {
   });
 
   assert.equal(readiness.status, "ready");
+  assert.equal(readiness.contentKeeperId, "workspace-staging");
   assert.equal(readiness.checks.length, 3);
   assert.equal(readiness.checks.every((check) => check.status === "ok"), true);
   assert.equal(readiness.checks.find((check) => check.name === "workspaces").matched, true);
@@ -474,6 +552,8 @@ try {
     arguments: { projectName: "sample-project", repositoryRoot },
   });
   assert.equal(assetTypes.status, "ready");
+  assert.equal(assetTypes.contentKeeperId, "workspace-staging");
+  assert.equal(assetTypes.workspaceId, "workspace-staging");
   assert.equal(assetTypes.digitalAssetTypes[0].digitalAssetType, "Report");
 
   const assetRead = await callTool({
@@ -486,6 +566,8 @@ try {
     arguments: { projectName: "sample-project", repositoryRoot, digitalAssetId: "asset-staging" },
   });
   assert.equal(assetRead.status, "found");
+  assert.equal(assetRead.contentKeeperId, "workspace-staging");
+  assert.equal(assetRead.workspaceId, "workspace-staging");
   assert.equal(assetRead.selectedContext.projectId, "project-staging");
   assert.equal(assetRead.asset.status, "draft");
   assert.equal(assetRead.asset.projectId, "project-staging");
@@ -500,6 +582,8 @@ try {
     arguments: { projectName: "sample-project", repositoryRoot, query: "", status: "draft" },
   });
   assert.equal(assetSearch.status, "ready");
+  assert.equal(assetSearch.contentKeeperId, "workspace-staging");
+  assert.equal(assetSearch.workspaceId, "workspace-staging");
   assert.equal(assetSearch.selectedContext.projectId, "project-staging");
   assert.equal(assetSearch.results[0].status, "draft");
 
@@ -523,9 +607,13 @@ try {
   });
 
   assert.equal(write.status, "created");
+  assert.equal(write.contentKeeperId, "workspace-staging");
+  assert.equal(write.workspaceId, "workspace-staging");
+  assert.equal(write.selectedContext.contentKeeperId, "workspace-staging");
   assert.equal(write.selectedContext.workspaceId, "workspace-staging");
   assert.equal(write.selectedContext.projectId, "project-staging");
   assert.equal(write.asset.workspaceId, "workspace-staging");
+  assert.equal(write.asset.contentKeeperId, "workspace-staging");
   assert.equal(write.asset.projectId, "project-staging");
   assert.equal(seenWriteBodies.length, 1);
   assert.equal(seenWriteBodies[0].projectId, "project-staging");
@@ -657,7 +745,8 @@ try {
   assert.equal(fs.existsSync(upsertRegistryPath), true);
 
   const upsertedDocument = JSON.parse(fs.readFileSync(upsertRegistryPath, "utf8"));
-  assert.equal(upsertedDocument.version, 2);
+  assert.equal(upsertedDocument.version, 3);
+  assert.equal(upsertedDocument.environments.staging.projects[0].contentKeeperId, "workspace-staging");
   assert.equal(upsertedDocument.environments.staging.projects.length, 1);
 
   const workspaceOnlyUpsert = await callTool({
@@ -714,7 +803,7 @@ try {
 
   assert.equal(
     productionWithoutScopedConfig.status,
-    "unconfigured",
+    "blocked",
     `Unexpected production context result: ${JSON.stringify(productionWithoutScopedConfig)}`,
   );
   assert.equal(productionWithoutScopedConfig.registry.environment, "production");
@@ -730,13 +819,16 @@ try {
     env: {
       CONTENTTRAKER_CODEX_REGISTRY: productionRegistryPath,
       CONTENTTRAKER_ENVIRONMENT: "production",
-      CONTENTTRAKER_PRODUCTION_API_BASE_URL: "https://api.contenttraker.test",
+      CONTENTTRAKER_PRODUCTION_API_BASE_URL: apiBaseUrl,
+      CONTENTTRAKER_PRODUCTION_OAUTH_RESOURCE: apiBaseUrl,
       CONTENTTRAKER_ENABLE_PRODUCTION_WRITES: "true",
     },
   });
 
   assert.equal(production.status, "resolved");
   assert.equal(production.selectedContext.environment, "production");
+  assert.equal(production.contentKeeperId, "workspace-production");
+  assert.equal(production.selectedContext.contentKeeperId, "workspace-production");
   assert.equal(production.selectedContext.workspaceId, "workspace-production");
   assert.equal(production.api.configured, true);
   assert.equal(production.api.baseUrlSource, "CONTENTTRAKER_PRODUCTION_API_BASE_URL");
@@ -783,6 +875,12 @@ async function verifyProductionBundleStarts() {
   assert.equal(result.stderr, "");
   const responses = result.stdout.split(/\r?\n/u).filter(Boolean).map((line) => JSON.parse(line));
   assert.equal(responses.length, 3);
+  assert.match(responses[0].result.instructions, /local stdio ContentTraker server/);
+  assert.match(responses[0].result.instructions.slice(0, 512), /ContentKeeperId/);
+  assert.equal(
+    responses[1].result.tools.every((tool) => tool.outputSchema?.type === "object"),
+    true,
+  );
   assert.equal(responses[1].result.tools.some((tool) => tool.name === "inspect_runtime_capabilities"), true);
   assert.equal(responses[1].result.tools.some((tool) => tool.name === "confirm_contenttraker_context"), true);
   assert.equal(responses[1].result.tools.some((tool) => tool.name === "reset_contenttraker_context"), true);
@@ -851,6 +949,14 @@ async function callTool({ name, env, arguments: toolArguments }) {
 
   const tools = responses[1].result.tools;
   assert.equal(Array.isArray(tools), true);
+  assert.match(responses[0].result.instructions, /local stdio ContentTraker server/);
+  assert.match(responses[0].result.instructions.slice(0, 512), /ContentKeeperId/);
+  assert.equal(tools.every((tool) => tool.outputSchema?.type === "object"), true);
+  const searchTool = tools.find((tool) => tool.name === "search_digital_assets");
+  assert.equal(searchTool.inputSchema.properties.contentKeeperId.type, "string");
+  assert.equal(Array.isArray(searchTool.inputSchema.properties.context.anyOf), true);
+  assert.equal(searchTool.inputSchema.properties.context.anyOf.length, 2);
+  assert.match(searchTool.inputSchema.properties.workspaceId.description, /Deprecated equal-value .*alias/);
   assert.equal(
     tools.some((tool) => tool.name === "resolve_contenttraker_context"),
     true,

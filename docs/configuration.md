@@ -30,20 +30,20 @@ The marketplace manifest requires a host-owned identity policy but does not cont
 
 Business API tools never initiate interactive authorization. Call `begin_contenttraker_login` and `poll_contenttraker_login`; `get_current_user` returns `authentication_required` when no credential can be restored.
 
-Workspace context has a separate fail-closed precedence:
+ContentKeeper context has a separate fail-closed precedence:
 
-1. explicit per-call `workspaceId`, `workspaceKey`, or `workspaceName`;
+1. explicit per-call canonical `contentKeeperId`, compatible `workspaceId`, `workspaceKey`, or `workspaceName`;
 2. a live-authorized, human-confirmed marker for the current Git worktree and environment;
-3. an exact environment-scoped registry mapping when the worktree has not been explicitly reset;
-4. live resolution and the smallest necessary human confirmation.
+3. an exact repository-root registry mapping when the worktree has not been explicitly reset, followed by live authorization;
+4. block and request the smallest necessary human confirmation.
 
-An explicit per-call selector intentionally wins over the marker. Without an explicit selector, the absolute `repositoryRoot` is required because the adapter process runs from the installed plugin directory. A missing root or an invalid, copied, stale, unauthorized, or malformed marker blocks fallback instead of silently selecting a registry/default workspace.
+An explicit per-call selector intentionally wins over the marker. `workspaceId` is the current API's equal-value alias for `contentKeeperId`; divergent aliases are rejected. Prefer the discriminated `context` input with either `source: "content-keeper"` or `source: "worktree"`. Without an explicit selector, the absolute `repositoryRoot` is required because the adapter process runs from the installed plugin directory. A missing root or an invalid, copied, stale, unauthorized, or malformed marker blocks fallback. Environment defaults and project-name-only registry entries never route a business operation.
 
 ## Durable worktree selection
 
 Use `$contenttraker-select` or ask plainly to select the ContentTraker context. The skill verifies the effective caller and exact live workspace/project before calling `confirm_contenttraker_context`. That tool requires the literal confirmation `CONFIRM_CONTENTTRAKER_CONTEXT` and writes `.contenttraker-codex/context.json` only after the user's exact choice is confirmed.
 
-The versioned file keeps separate `staging` and `production` entries. Each binding records the normalized repository identity, a worktree fingerprint, stable workspace identifiers and names, optional project provenance, confirmation timestamp, and plugin provenance. It never stores a token, refresh credential, authorization code, cookie, keyring value, password, secret, or remote asset content.
+The versioned file keeps separate `staging` and `production` entries. Marker schema v2 records the normalized repository identity, a worktree fingerprint, equal canonical `contentKeeperId` and compatibility `workspaceId`, optional display metadata and project provenance, confirmation timestamp, and plugin provenance. Marker v1 is migrated in memory and rewritten as v2 on the next confirmation. It never stores a token, refresh credential, authorization code, cookie, keyring value, password, secret, or remote asset content.
 
 The marker is automatically added to Git's private worktree-safe `info/exclude` rules, including its atomic temporary files. The plugin does not edit the tracked `.gitignore`, and it refuses to use a marker path that is already tracked.
 

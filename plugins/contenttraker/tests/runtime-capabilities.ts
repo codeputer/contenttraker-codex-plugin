@@ -22,7 +22,7 @@ assert.equal(linuxResult.status, "ready");
 assert.deepEqual(linuxResult.adapterIdentity, {
   pluginId: "contenttraker@contenttraker",
   pluginName: "contenttraker",
-  pluginVersion: "0.4.1",
+  pluginVersion: "0.5.0",
   mcpRegistrationKey: "contenttraker-codex-adapter",
   hostBoundary: "local-codex-plugin",
   codexTransport: "stdio",

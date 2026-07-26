@@ -689,7 +689,7 @@ class FakeContextApi {
     this.authorizationCalls.push({ ...context });
     const workspaces = this.workspaces.filter((workspace) =>
       matchesSelectors(workspace, {
-        id: context.workspaceId,
+        id: context.contentKeeperId ?? context.workspaceId,
         key: context.workspaceKey,
         name: context.workspaceName,
       }));
@@ -708,6 +708,7 @@ class FakeContextApi {
     const workspace = workspaces[0];
     const selected: ContentTrakerContext = {
       environment: this.environment,
+      contentKeeperId: workspace.id,
       workspaceId: workspace.id,
       workspaceKey: workspace.key,
       workspaceName: workspace.name,
@@ -813,6 +814,7 @@ function binding(
     environment,
     repositoryIdentity: identity.repositoryIdentity,
     worktreeId: identity.worktreeId,
+    contentKeeperId: workspaceId,
     workspaceId,
     workspaceKey: `${workspaceId}-key`,
     workspaceName: `${workspaceId} name`,

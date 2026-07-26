@@ -1,4 +1,5 @@
 import type { ContentTrakerApiClient } from "../contenttraker-api-client.js";
+import { normalizeContentKeeperAliases } from "../contentkeeper-id.js";
 import {
   CONTENTTRAKER_PLUGIN_NAME,
   CONTENTTRAKER_PLUGIN_VERSION,
@@ -26,6 +27,8 @@ export async function confirmContentTrakerContext(
   const api = apiClient.getStatus(securityContext);
   const environment = api.environmentProfile.name;
   const diagnostics: string[] = [];
+  const aliases = normalizeContentKeeperAliases(input);
+  if (aliases.diagnostic) diagnostics.push(aliases.diagnostic);
   if (!environment) {
     diagnostics.push("context_confirmation_blocked: active ContentTraker environment must be staging or production.");
   }
@@ -37,8 +40,8 @@ export async function confirmContentTrakerContext(
   if (input.confirmation !== CONFIRMATION) {
     diagnostics.push(`confirmation must be '${CONFIRMATION}'.`);
   }
-  if (!input.workspaceId?.trim() && !input.workspaceKey?.trim() && !input.workspaceName?.trim()) {
-    diagnostics.push("workspaceId, workspaceKey, or workspaceName is required.");
+  if (!aliases.contentKeeperId && !input.workspaceKey?.trim() && !input.workspaceName?.trim()) {
+    diagnostics.push("contentKeeperId, workspaceKey, or workspaceName is required.");
   }
   if (!input.repositoryRoot?.trim()) {
     diagnostics.push("repositoryRoot is required.");
@@ -66,7 +69,8 @@ export async function confirmContentTrakerContext(
     }
     const requestedContext: ContentTrakerContext = {
       environment,
-      workspaceId: trimmed(input.workspaceId),
+      contentKeeperId: aliases.contentKeeperId,
+      workspaceId: aliases.workspaceId,
       workspaceKey: trimmed(input.workspaceKey),
       workspaceName: trimmed(input.workspaceName),
       projectId: trimmed(input.projectId),
@@ -75,7 +79,7 @@ export async function confirmContentTrakerContext(
       source: "explicit-workspace",
     };
     const verified = await apiClient.resolveAuthorizedContext(requestedContext, securityContext);
-    if (verified.status !== "ready" || !verified.selectedContext?.workspaceId) {
+    if (verified.status !== "ready" || !verified.selectedContext?.contentKeeperId) {
       return {
         status: verified.status === "blocked" ? "blocked" : "failed",
         environment,
@@ -91,7 +95,8 @@ export async function confirmContentTrakerContext(
       environment,
       repositoryIdentity: identity.repositoryIdentity,
       worktreeId: identity.worktreeId,
-      workspaceId: selected.workspaceId!,
+      contentKeeperId: selected.contentKeeperId!,
+      workspaceId: selected.contentKeeperId!,
       workspaceKey: selected.workspaceKey,
       workspaceName: selected.workspaceName,
       projectId: selected.projectId,

@@ -132,10 +132,13 @@ try {
   const responses = await runConfiguredAdapter(adapter, installedRoot);
   assert.equal(responses[0].result.serverInfo.name, packageDocument.name);
   assert.equal(responses[0].result.serverInfo.version, packageDocument.version);
+  assert.match(responses[0].result.instructions, /local stdio ContentTraker server/);
+  assert.match(responses[0].result.instructions.slice(0, 512), /ContentKeeperId/);
   assert.deepEqual(
     responses[1].result.tools.map((tool) => tool.name).sort(),
     [...expectedToolNames].sort(),
   );
+  assert.equal(responses[1].result.tools.every((tool) => tool.outputSchema?.type === "object"), true);
   const runtime = responses[2].result.structuredContent;
   assert.equal(typeof runtime, "object");
   assertRuntimeStatus(runtime);
@@ -162,7 +165,12 @@ try {
   if (marketplaceInstalled) {
     runCodex(["plugin", "marketplace", "remove", marketplaceName, "--json"], true);
   }
-  fs.rmSync(smokeRoot, { recursive: true, force: true });
+  fs.rmSync(smokeRoot, {
+    recursive: true,
+    force: true,
+    maxRetries: process.platform === "win32" ? 10 : 0,
+    retryDelay: 200,
+  });
 }
 
 function createExtractedMarketplace(destinationRoot) {
@@ -355,6 +363,11 @@ async function runCodexHostedRuntimeDiagnostic() {
       Object.keys(adapter.tools).sort(),
       [...expectedToolNames].sort(),
       "Codex did not expose exactly the expected installed ContentTraker tools.",
+    );
+    assert.equal(
+      Object.values(adapter.tools).every((tool) => tool.outputSchema?.type === "object"),
+      true,
+      "Codex did not retain the installed ContentTraker output schemas.",
     );
     const result = await client.request("mcpServer/tool/call", {
       threadId,

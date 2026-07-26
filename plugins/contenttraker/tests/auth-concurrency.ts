@@ -282,6 +282,8 @@ async function effectiveCallerVerificationAndAudienceBindingAreMandatory(): Prom
   assert.equal(server.requests[0]?.authorization, server.requests[1]?.authorization);
   assert.equal(result.api.security?.effectiveCallerVerified, true);
   assert.equal(result.api.security?.authenticatedSubjectId, "user-origin");
+  assert.equal(result.api.security?.authenticatedTokenIssuer, "public-test-issuer");
+  assert.equal(result.api.security?.durableAccountKey, "public-test-issuer|user-origin");
 
   const originalBaseUrl = process.env.CONTENTTRAKER_STAGING_API_BASE_URL;
   process.env.CONTENTTRAKER_STAGING_API_BASE_URL = "https://wrong-origin.example";

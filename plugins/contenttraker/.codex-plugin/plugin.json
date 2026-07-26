@@ -1,7 +1,7 @@
 {
   "name": "contenttraker",
-  "version": "0.4.1",
-  "description": "Secure local Codex adapter for ContentTraker workspace and digital asset operations.",
+  "version": "0.5.0",
+  "description": "Fast local stdio adapter for account-aware ContentKeeper and digital asset operations.",
   "author": {
     "name": "Richard Reukema",
     "email": "richard@phoenixbussolutions.com",
@@ -14,16 +14,16 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "ContentTraker Local Adapter",
-    "shortDescription": "Use ContentTraker through the local Codex adapter.",
-    "longDescription": "Codex launches this local stdio MCP adapter as a child process. The adapter calls the documented ContentTraker HTTPS JSON API, enforces a host-owned identity policy, and provides durable per-worktree workspace context plus digital asset tools. The package does not bundle or reuse the separate ContentTraker.com app connector.",
+    "shortDescription": "Use the exact authorized ContentKeeper through local stdio.",
+    "longDescription": "Codex launches this fast local stdio MCP adapter as a child process. The adapter calls the documented ContentTraker HTTPS JSON API, binds the account to issuer plus subject, resolves one live-authorized ContentKeeperId, and provides durable fail-closed per-worktree context plus structured digital asset tools. The package does not bundle or reuse the separate ContentTraker.com app connector.",
     "developerName": "PhxBiz",
     "category": "Productivity",
-    "capabilities": ["MCP", "OAuth PKCE", "OAuth Device Authorization", "Restart-safe OS Keyring", "Durable Worktree Context", "Digital Assets"],
+    "capabilities": ["MCP Server Instructions", "Structured Tool Output", "OAuth PKCE", "OAuth Device Authorization", "Issuer + Subject Account Boundary", "Restart-safe OS Keyring", "Durable ContentKeeper Context", "Digital Assets"],
     "websiteURL": "https://contenttraker.com",
     "defaultPrompt": [
-      "Report the authenticated ContentTraker user and list authorized workspaces.",
-      "Select and remember the ContentTraker context for this worktree.",
-      "Create an approved draft digital asset."
+      "Verify the authenticated ContentTraker account and list its authorized ContentKeepers.",
+      "Select and remember the exact authorized ContentKeeper for this worktree.",
+      "Create an approved idempotent draft digital asset in the resolved ContentKeeper."
     ],
     "brandColor": "#0F766E"
   },

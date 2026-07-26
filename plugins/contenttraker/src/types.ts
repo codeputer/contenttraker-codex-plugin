@@ -117,7 +117,6 @@ export interface AuthorizationFlowResult {
 
 export type ContextResolutionStatus =
   | "resolved"
-  | "defaulted"
   | "workspace_conflict"
   | "blocked"
   | "failed"
@@ -167,6 +166,8 @@ export interface RequestSecurityDiagnostics {
   sessionId: string;
   requestId: string;
   authenticatedSubjectId?: string;
+  authenticatedTokenIssuer?: string;
+  durableAccountKey?: string;
   credentialHandle?: string;
   credentialProfile?: string;
   credentialStore?: TokenStrategyStatus["credentialStore"];
@@ -195,6 +196,8 @@ export interface WritePolicyStatus {
 export interface ContentTrakerContext {
   environment?: ContentTrakerEnvironment;
   workspaceName?: string;
+  contentKeeperId?: string;
+  /** Compatibility alias for contentKeeperId. */
   workspaceId?: string;
   workspaceKey?: string;
   projectName?: string;
@@ -204,7 +207,6 @@ export interface ContentTrakerContext {
     | "explicit-workspace"
     | "worktree-marker"
     | "registry-project"
-    | "registry-default"
     | "workspace-conflict";
   workspaceConflict?: {
     explicit: WorkspaceCandidate;
@@ -214,12 +216,32 @@ export interface ContentTrakerContext {
 
 export interface WorkspaceCandidate {
   workspaceName?: string;
+  contentKeeperId?: string;
   workspaceId?: string;
   source: "explicit-workspace" | "registry-project";
 }
 
+export interface ExplicitContentKeeperContextSelector {
+  source: "content-keeper";
+  contentKeeperId?: string;
+  workspaceId?: string;
+  workspaceKey?: string;
+  workspaceName?: string;
+}
+
+export interface WorktreeContentKeeperContextSelector {
+  source: "worktree";
+  repositoryRoot: string;
+}
+
+export type ContentKeeperContextSelector =
+  | ExplicitContentKeeperContextSelector
+  | WorktreeContentKeeperContextSelector;
+
 export interface ResolveContextInput {
+  context?: ContentKeeperContextSelector;
   projectName?: string;
+  contentKeeperId?: string;
   workspaceId?: string;
   workspaceKey?: string;
   workspaceName?: string;
@@ -239,6 +261,7 @@ export interface WorktreeContextBinding {
   environment: ContentTrakerEnvironment;
   repositoryIdentity: string;
   worktreeId: string;
+  contentKeeperId: string;
   workspaceId: string;
   workspaceKey?: string;
   workspaceName?: string;
@@ -259,7 +282,7 @@ export interface WorktreeContextReset {
 }
 
 export interface WorktreeContextDocument {
-  schemaVersion: 1;
+  schemaVersion: 2;
   contexts: Partial<Record<ContentTrakerEnvironment, WorktreeContextBinding>>;
   resets: Partial<Record<ContentTrakerEnvironment, WorktreeContextReset>>;
 }
@@ -285,6 +308,7 @@ export interface AuthorizedContextResolutionResult {
 export interface ConfirmContentTrakerContextInput {
   repositoryRoot: string;
   environment?: ContentTrakerEnvironment;
+  contentKeeperId?: string;
   workspaceId?: string;
   workspaceKey?: string;
   workspaceName?: string;
@@ -446,6 +470,7 @@ export interface UpsertRegistryMappingInput {
   environment?: ContentTrakerEnvironment;
   projectName: string;
   repositoryRoot: string;
+  contentKeeperId?: string;
   workspaceName?: string;
   workspaceId?: string;
   contentTrakerProjectName?: string;
@@ -457,6 +482,7 @@ export interface UpsertRegistryMappingInput {
 export interface RegistryProjectMapping {
   projectName: string;
   repositoryRoot?: string;
+  contentKeeperId?: string;
   workspaceName?: string;
   workspaceId?: string;
   contentTrakerProjectName?: string;
@@ -464,9 +490,10 @@ export interface RegistryProjectMapping {
 }
 
 export interface WorkspaceRegistryDocument {
-  version: 1 | 2;
+  version: 1 | 2 | 3;
   defaults?: {
     workspaceName?: string;
+    contentKeeperId?: string;
     workspaceId?: string;
     projectName?: string;
     projectId?: string;
@@ -478,6 +505,7 @@ export interface WorkspaceRegistryDocument {
 export interface WorkspaceRegistryEnvironment {
   defaults?: {
     workspaceName?: string;
+    contentKeeperId?: string;
     workspaceId?: string;
     projectName?: string;
     projectId?: string;
@@ -534,8 +562,10 @@ export interface CreateDigitalAssetResult {
   api: ApiClientStatus;
   selectedContext?: ContentTrakerContext;
   contextCorrelationIds?: string[];
+  contentKeeperId?: string;
   asset?: {
     digitalAssetId?: string;
+    contentKeeperId?: string;
     workspaceId?: string;
     workspaceKey?: string;
     projectId?: string;
@@ -559,8 +589,10 @@ export interface SetDigitalAssetStatusResult {
   api: ApiClientStatus;
   selectedContext?: ContentTrakerContext;
   contextCorrelationIds?: string[];
+  contentKeeperId?: string;
   asset?: {
     digitalAssetId?: string;
+    contentKeeperId?: string;
     workspaceId?: string;
     workspaceKey?: string;
     projectId?: string;
@@ -581,6 +613,7 @@ export interface GetDigitalAssetResult {
   api: ApiClientStatus;
   selectedContext?: ContentTrakerContext;
   contextCorrelationIds?: string[];
+  contentKeeperId?: string;
   asset?: Record<string, unknown>;
   httpStatus?: number;
   diagnostics: string[];
@@ -591,6 +624,7 @@ export interface SearchDigitalAssetsResult {
   api: ApiClientStatus;
   selectedContext?: ContentTrakerContext;
   contextCorrelationIds?: string[];
+  contentKeeperId?: string;
   workspaceId?: string;
   workspaceKey?: string;
   defaultStatus?: string;
@@ -605,6 +639,7 @@ export interface ListDigitalAssetTypesResult {
   api: ApiClientStatus;
   selectedContext?: ContentTrakerContext;
   contextCorrelationIds?: string[];
+  contentKeeperId?: string;
   workspaceId?: string;
   workspaceKey?: string;
   digitalAssetTypes: Array<Record<string, unknown>>;
@@ -618,6 +653,7 @@ export interface UpdateDigitalAssetResult {
   api: ApiClientStatus;
   selectedContext?: ContentTrakerContext;
   contextCorrelationIds?: string[];
+  contentKeeperId?: string;
   asset?: Record<string, unknown>;
   httpStatus?: number;
   diagnostics: string[];
@@ -628,6 +664,7 @@ export interface DigitalAssetUploadResult {
   api: ApiClientStatus;
   selectedContext?: ContentTrakerContext;
   contextCorrelationIds?: string[];
+  contentKeeperId?: string;
   upload?: Record<string, unknown>;
   httpStatus?: number;
   diagnostics: string[];
@@ -654,6 +691,7 @@ export interface ApiReadinessResult {
   api: ApiClientStatus;
   selectedContext?: ContentTrakerContext;
   contextCorrelationIds?: string[];
+  contentKeeperId?: string;
   checks: ApiReadinessCheck[];
   diagnostics: string[];
 }
@@ -688,16 +726,16 @@ export interface ResolveContextResult {
 }
 
 export interface RegistryUpsertResult {
-  status: "created" | "updated" | "unchanged" | "dry-run";
+  status: "created" | "updated" | "unchanged" | "dry-run" | "blocked";
   dryRun: boolean;
   registry: {
     path: string;
     existsBefore: boolean;
-    documentVersion: 2;
+    documentVersion: 3;
     environment: ContentTrakerEnvironment;
     projectCount: number;
   };
-  selectedContext: ContentTrakerContext;
+  selectedContext?: ContentTrakerContext;
   diagnostics: string[];
 }
 
