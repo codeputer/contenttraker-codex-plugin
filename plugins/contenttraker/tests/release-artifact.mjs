@@ -93,6 +93,15 @@ assert.match(
   sourceMetadata,
   new RegExp(`CONTENTTRAKER_PLUGIN_VERSION\\s*=\\s*"${packageDocument.version.replaceAll(".", "\\.")}"`),
 );
+const packagedMcpSkill = fs.readFileSync(path.join(pluginRoot, packagedSkillPaths[0]), "utf8");
+const packagedSelectSkill = fs.readFileSync(path.join(pluginRoot, packagedSkillPaths[1]), "utf8");
+assert.match(packagedMcpSkill, /local stdio surface is authoritative/);
+assert.match(packagedMcpSkill, /durable account key is token issuer plus authenticated subject/);
+assert.match(packagedMcpSkill, /contentKeeperId/);
+assert.match(packagedMcpSkill, /Environment defaults and project-name-only mappings never authorize business operations/);
+assert.match(packagedMcpSkill, /Every successful business result returns canonical `contentKeeperId`/);
+assert.match(packagedSelectSkill, /exact repository-root registry mapping/);
+assert.match(packagedSelectSkill, /Environment defaults never route business operations/);
 assert.deepEqual(mcpDocument.mcpServers["contenttraker-codex-adapter"], {
   cwd: ".",
   command: "node",
@@ -358,12 +367,15 @@ async function verifyExtractedMarketplaceArtifact() {
     assert.equal(responses[0].id, 1);
     assert.equal(responses[0].result.serverInfo.name, packageDocument.name);
     assert.equal(responses[0].result.serverInfo.version, packageDocument.version);
+    assert.match(responses[0].result.instructions, /local stdio ContentTraker server/);
+    assert.match(responses[0].result.instructions.slice(0, 512), /ContentKeeperId/);
     assert.equal(responses[1].id, 2);
     assert.deepEqual(
       responses[1].result.tools.map((tool) => tool.name).sort(),
       [...expectedToolNames].sort(),
       "The extracted production plugin does not expose exactly the expected 27 tools.",
     );
+    assert.equal(responses[1].result.tools.every((tool) => tool.outputSchema?.type === "object"), true);
     assert.equal(responses[2].id, 3);
     assert.equal(responses[2].result.isError ?? false, false);
     const capabilities = responses[2].result.structuredContent;

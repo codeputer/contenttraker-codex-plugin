@@ -32,7 +32,19 @@ The adapter deletes a malformed v2 record or a refresh credential rejected with 
 
 ## `repository_root_required_for_durable_context`
 
-The operation did not include an explicit workspace selector or an absolute `repositoryRoot`. Pass `workspaceId`/`workspaceKey` for a one-call override, or pass the current Git worktree root so the adapter can validate `.contenttraker-codex/context.json`. The adapter cannot infer the user's worktree from its own installed-plugin directory.
+The operation did not include an explicit ContentKeeper selector or an absolute `repositoryRoot`. Pass canonical `contentKeeperId` (or compatible `workspaceId`/`workspaceKey`) for a one-call override, or pass the current Git worktree root so the adapter can validate `.contenttraker-codex/context.json`. The adapter cannot infer the user's worktree from its own installed-plugin directory.
+
+## `content_keeper_alias_mismatch`
+
+`contentKeeperId` and compatibility `workspaceId` were both supplied with different trimmed values. Correct the caller so both names contain the exact same ContentKeeper identifier, or send only `contentKeeperId`. No authorization lookup or business API request is attempted.
+
+## `contentkeeper_selection_required`
+
+The worktree has no human-confirmed marker and no exact repository-root registry mapping. An environment default or project-name-only mapping may exist, but it cannot authorize business operations. Call `get_current_user`, `list_workspaces`, and `$contenttraker-select`, or pass an explicit authorized `contentKeeperId`.
+
+## `context_registry_authorization_rejected`
+
+The exact repository mapping exists but its ContentKeeper or project provenance is stale or no longer authorized for the effective issuer + subject account. No environment default is used. Verify the effective user, list authorized ContentKeepers, and confirm the intended target again.
 
 ## Context marker is malformed or belongs elsewhere
 
@@ -60,9 +72,15 @@ The requested selection/reset environment differs from the adapter's active envi
 
 Use `$contenttraker-select`, `$contenttraker-reset`, or plain language. Native `/contenttraker-select` and `/contenttraker-reset` aliases are not part of the current plugin contract. After installing or upgrading the plugin, restart Codex and open a new task so the skills and MCP tool catalog reload.
 
-## Workspace is not authorized
+## ContentKeeper is not authorized
 
-The exact selected workspace ID/key was absent from the authenticated user's `/workspaces` response. No write was sent. Verify `get_current_user`, list workspaces again, and do not substitute a project name or another cached identity.
+The exact selected ContentKeeper ID/key was absent from the authenticated user's `/workspaces` response. No business request was sent. Verify `get_current_user`, list ContentKeepers again, and do not substitute a project name, display name, environment default, or another cached identity.
+
+## Migrating to the account-aware v0.5.0 plugin
+
+Version 0.5.0 is currently an unreleased development candidate. After its immutable tag is published, replace the marketplace snapshot and open a new task so Codex receives the server instructions and output schemas.
+
+Existing explicit `workspaceId` calls remain valid. Marker v1 and registry v1/v2 remain readable; the next confirmed marker write emits v2 and the next registry update emits v3 with canonical `contentKeeperId`. Environment defaults remain present for diagnostics but stop routing business operations. See [ContentKeeper identity and migration](contentkeeper-migration.md).
 
 ## Migrating to the identity-bound v0.4.1 plugin
 

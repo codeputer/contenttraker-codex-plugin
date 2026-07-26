@@ -28,11 +28,45 @@ function explicitWorkspaceDoesNotBecomeProjectIdentity(): void {
   assert.deepEqual(context, {
     environment: "staging",
     workspaceName: "Requested Workspace",
+    contentKeeperId: undefined,
     workspaceId: undefined,
     workspaceKey: undefined,
     source: "explicit-workspace",
   });
   assert.equal(context?.projectName, undefined);
+}
+
+function exactRepositoryMappingWinsButEnvironmentDefaultNeverRoutes(): void {
+  const exact = resolveContextFromRegistry(
+    { repositoryRoot: "/repo/exact" },
+    registry(),
+  );
+  assert.equal(exact?.source, "registry-project");
+  assert.equal(exact?.contentKeeperId, "workspace-registry");
+  assert.equal(exact?.workspaceId, "workspace-registry");
+
+  const unmapped = resolveContextFromRegistry(
+    { repositoryRoot: "/repo/unmapped" },
+    registry(),
+  );
+  assert.equal(unmapped, undefined);
+
+  const projectNameOnly = resolveContextFromRegistry(
+    { projectName: "LocalProject" },
+    registry(),
+  );
+  assert.equal(projectNameOnly, undefined);
+}
+
+function divergentAliasesAreRejectedBeforeRouting(): void {
+  const context = resolveContextFromRegistry(
+    {
+      contentKeeperId: "contentkeeper-one",
+      workspaceId: "contentkeeper-two",
+    },
+    registry(),
+  );
+  assert.equal(context, undefined);
 }
 
 function explicitWorkspaceWinsRegistryMapping(): void {
@@ -78,7 +112,7 @@ async function unauthorizedWorkspacePreventsWrite(): Promise<void> {
   const client = new EnvironmentContentTrakerApiClient(fakeTokenProvider() as never, server);
   const result = await client.createDigitalAsset(createInput(), explicitContext("workspace-denied"), security());
   assert.equal(result.status, "failed");
-  assert.match(result.diagnostics.join(" "), /workspaceId is not authorized/);
+  assert.match(result.diagnostics.join(" "), /ContentKeeperId is not authorized/);
   assert.equal(server.postCount, 0);
 }
 
@@ -132,6 +166,7 @@ async function authorizedContextResolutionCanonicalizesProjectMembership(): Prom
     source: "worktree-marker",
   }, security());
   assert.equal(result.status, "ready");
+  assert.equal(result.selectedContext?.contentKeeperId, "workspace-authorized");
   assert.equal(result.selectedContext?.workspaceId, "workspace-authorized");
   assert.equal(result.selectedContext?.projectId, "project-authorized");
   assert.equal(result.selectedContext?.source, "worktree-marker");
@@ -160,14 +195,16 @@ function registry(): RegistrySnapshot {
     environmentConfigured: true,
     projectCount: 1,
     errors: [],
-    documentVersion: 2,
+    documentVersion: 3,
     document: {
-      version: 2,
+      version: 3,
       environments: {
         staging: {
           defaults: { workspaceName: "Default Workspace", workspaceId: "workspace-default" },
           projects: [{
             projectName: "LocalProject",
+            repositoryRoot: "/repo/exact",
+            contentKeeperId: "workspace-registry",
             workspaceName: "Registry Workspace",
             workspaceId: "workspace-registry",
             contentTrakerProjectName: "Optional Provenance",
@@ -181,6 +218,8 @@ function registry(): RegistrySnapshot {
       defaults: { workspaceName: "Default Workspace", workspaceId: "workspace-default" },
       projects: [{
         projectName: "LocalProject",
+        repositoryRoot: "/repo/exact",
+        contentKeeperId: "workspace-registry",
         workspaceName: "Registry Workspace",
         workspaceId: "workspace-registry",
         contentTrakerProjectName: "Optional Provenance",
@@ -265,7 +304,12 @@ function response(json: unknown, statusCode = 200): JsonResponse {
 }
 
 function explicitContext(workspaceId: string): ContentTrakerContext {
-  return { environment: "staging", workspaceId, source: "explicit-workspace" };
+  return {
+    environment: "staging",
+    contentKeeperId: workspaceId,
+    workspaceId,
+    source: "explicit-workspace",
+  };
 }
 
 function createInput() {
@@ -295,6 +339,8 @@ try {
   explicitWorkspaceWinsRegistryMapping();
   matchingExplicitWorkspaceStillWinsOptionalRegistryProvenance();
   explicitWorkspaceWinsCorruptRegistry();
+  exactRepositoryMappingWinsButEnvironmentDefaultNeverRoutes();
+  divergentAliasesAreRejectedBeforeRouting();
   await currentUserReturnsAuthenticationRequired();
   await unauthorizedWorkspacePreventsWrite();
   await conflictPreventsAnyApiCall();

@@ -9,6 +9,10 @@ import { ContentTrakerOAuthMetadataResolver } from "./oauth-metadata.js";
 import { ContentTrakerSecurityContextFactory } from "./security-context.js";
 import { CONTENTTRAKER_PLUGIN_VERSION } from "./plugin-metadata.js";
 import {
+  canonicalContentKeeperId,
+  normalizeContentKeeperAliases,
+} from "./contentkeeper-id.js";
+import {
   createContentTrakerTokenProvider,
   type ContentTrakerTokenProvider,
 } from "./token-provider.js";
@@ -46,6 +50,60 @@ let tokenProvider = createContentTrakerTokenProvider(
 let apiClient = new EnvironmentContentTrakerApiClient(tokenProvider);
 const securityContextFactory = new ContentTrakerSecurityContextFactory();
 
+export const CONTENTTRAKER_SERVER_INSTRUCTIONS = [
+  "Use this local stdio ContentTraker server whenever the user asks to search, read, select, store, update, publish, archive, or troubleshoot ContentTraker content. Before every business operation, verify the effective user with get_current_user and resolve exactly one authorized ContentKeeperId. contentKeeperId is canonical; workspaceId is only an equal-value compatibility alias. Project identifiers are provenance, never authorization.",
+  "Prefer the context object: use source='content-keeper' with contentKeeperId for an explicit target, or source='worktree' with repositoryRoot for a saved exact mapping. Never use an environment-wide default for an unmapped worktree. If resolution is blocked, present the diagnostic and request the smallest necessary ContentTraker selection instead of silently falling back.",
+  "Before writes, obtain explicit user approval for the exact operation. Default new assets to draft, preserve the supplied content, use stable idempotency keys where required, and require the production confirmation literal when production writes are enabled. Never expose credentials or treat display names, email, repository names, or project IDs as authorization keys.",
+].join("\n\n");
+
+const structuredResultOutputSchema = z.object({
+  status: z.string().optional(),
+  contentKeeperId: z.string().optional(),
+  diagnostics: z.array(z.string()).optional(),
+}).catchall(z.unknown());
+
+const preferredContextInputSchema = z.discriminatedUnion("source", [
+  z.object({
+    source: z.literal("content-keeper"),
+    contentKeeperId: z.string().min(1).describe("Canonical authorized ContentKeeper identifier."),
+    workspaceId: z.string().min(1).optional().describe("Deprecated equal-value alias for contentKeeperId."),
+    workspaceKey: z.string().min(1).optional(),
+    workspaceName: z.string().min(1).optional(),
+  }),
+  z.object({
+    source: z.literal("worktree"),
+    repositoryRoot: z.string().min(1).describe("Absolute path inside the exact Git worktree."),
+  }),
+]);
+
+const contextAwareToolNames = new Set([
+  "resolve_contenttraker_context",
+  "probe_contenttraker_api_readiness",
+  "inspect_contenttraker_api_contract",
+  "list_digital_asset_types",
+  "get_digital_asset",
+  "search_digital_assets",
+  "create_digital_asset",
+  "begin_digital_asset_upload",
+  "append_digital_asset_upload_chunk",
+  "complete_digital_asset_upload",
+  "update_digital_asset",
+  "set_digital_asset_status",
+]);
+
+const remoteToolNames = new Set([
+  "inspect_contenttraker_oauth_metadata",
+  "begin_contenttraker_authorization",
+  "begin_contenttraker_login",
+  "get_contenttraker_authorization_status",
+  "poll_contenttraker_login",
+  "get_contenttraker_auth_status",
+  "get_current_user",
+  "list_workspaces",
+  "confirm_contenttraker_context",
+  ...contextAwareToolNames,
+]);
+
 export function setContentTrakerTokenProviderForInternalTest(provider: ContentTrakerTokenProvider): void {
   if (process.env.CONTENTTRAKER_INTERNAL_TEST_ADAPTER !== "1") {
     throw new Error("The ContentTraker internal test adapter is disabled.");
@@ -57,9 +115,99 @@ export function setContentTrakerTokenProviderForInternalTest(provider: ContentTr
 const server = new McpServer({
   name: "contenttraker",
   version: CONTENTTRAKER_PLUGIN_VERSION,
+}, {
+  instructions: CONTENTTRAKER_SERVER_INSTRUCTIONS,
 });
 
-server.registerTool(
+type UntypedToolCallback = (...args: any[]) => any;
+type UntypedToolConfig = Record<string, any>;
+const rawRegisterTool = server.registerTool.bind(server) as (
+  name: string,
+  config: UntypedToolConfig,
+  callback: UntypedToolCallback,
+) => unknown;
+const registerStructuredTool = ((
+  name: string,
+  config: UntypedToolConfig,
+  callback: UntypedToolCallback,
+) => {
+  const inputSchema = contextAwareToolNames.has(name)
+    ? {
+        context: preferredContextInputSchema.optional().describe(
+          "Preferred deterministic ContentKeeper routing contract. Do not combine it with conflicting top-level compatibility selectors.",
+        ),
+        contentKeeperId: z.string().min(1).optional().describe(
+          "Canonical ContentKeeper identifier. Preferred over the deprecated workspaceId alias.",
+        ),
+        ...config.inputSchema,
+        workspaceId: z.string().min(1).optional().describe(
+          "Deprecated equal-value compatibility alias for contentKeeperId.",
+        ),
+      }
+    : config.inputSchema;
+  const annotations = {
+    ...config.annotations,
+    ...(remoteToolNames.has(name) ? { openWorldHint: true } : {}),
+  };
+  return rawRegisterTool(
+    name,
+    {
+      ...config,
+      inputSchema,
+      outputSchema: structuredResultOutputSchema,
+      annotations,
+    },
+    async (...args: any[]) => normalizeStructuredToolResult(await callback(...args)),
+  );
+}) as McpServer["registerTool"];
+
+function normalizeStructuredToolResult(result: Record<string, any>): Record<string, any> {
+  const structured = isRecord(result.structuredContent)
+    ? { ...result.structuredContent }
+    : {};
+  const selectedContext = isRecord(structured.selectedContext)
+    ? { ...structured.selectedContext }
+    : undefined;
+  const aliases = selectedContext
+    ? normalizeContentKeeperAliases(selectedContext)
+    : {};
+  const contentKeeperId = canonicalContentKeeperId(selectedContext as any)
+    ?? (typeof structured.contentKeeperId === "string" ? structured.contentKeeperId : undefined);
+  if (selectedContext && !aliases.diagnostic && aliases.contentKeeperId) {
+    selectedContext.contentKeeperId = aliases.contentKeeperId;
+    selectedContext.workspaceId = aliases.workspaceId;
+    structured.selectedContext = selectedContext;
+  }
+  if (contentKeeperId) {
+    structured.contentKeeperId = contentKeeperId;
+    structured.workspaceId = contentKeeperId;
+    if (isRecord(structured.asset)) {
+      structured.asset = {
+        ...structured.asset,
+        contentKeeperId,
+        workspaceId: contentKeeperId,
+      };
+    }
+    if (isRecord(structured.upload)) {
+      structured.upload = {
+        ...structured.upload,
+        contentKeeperId,
+        workspaceId: contentKeeperId,
+      };
+    }
+  }
+  return {
+    ...result,
+    content: [{ type: "text" as const, text: JSON.stringify(structured, null, 2) }],
+    structuredContent: structured,
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, any> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+registerStructuredTool(
   "inspect_runtime_capabilities",
   {
     title: "Inspect ContentTraker Runtime Capabilities",
@@ -82,7 +230,7 @@ server.registerTool(
   },
 );
 
-server.registerTool(
+registerStructuredTool(
   "inspect_contenttraker_oauth_metadata",
   {
     title: "Inspect ContentTraker OAuth Metadata",
@@ -108,7 +256,7 @@ server.registerTool(
   },
 );
 
-server.registerTool(
+registerStructuredTool(
   "begin_contenttraker_authorization",
   {
     title: "Begin ContentTraker Authorization",
@@ -131,7 +279,7 @@ server.registerTool(
   },
 );
 
-server.registerTool(
+registerStructuredTool(
   "begin_contenttraker_login",
   {
     title: "Begin ContentTraker Login",
@@ -148,7 +296,7 @@ server.registerTool(
   },
 );
 
-server.registerTool(
+registerStructuredTool(
   "get_contenttraker_authorization_status",
   {
     title: "Get ContentTraker Authorization Status",
@@ -177,7 +325,7 @@ server.registerTool(
 );
 
 for (const toolName of ["poll_contenttraker_login", "get_contenttraker_auth_status"] as const) {
-  server.registerTool(
+  registerStructuredTool(
     toolName,
     {
       title: toolName === "poll_contenttraker_login"
@@ -202,7 +350,7 @@ for (const toolName of ["poll_contenttraker_login", "get_contenttraker_auth_stat
   );
 }
 
-server.registerTool(
+registerStructuredTool(
   "cancel_contenttraker_authorization",
   {
     title: "Cancel ContentTraker Authorization",
@@ -225,7 +373,7 @@ server.registerTool(
   },
 );
 
-server.registerTool(
+registerStructuredTool(
   "forget_contenttraker_credential",
   {
     title: "Forget ContentTraker Credential",
@@ -283,7 +431,7 @@ server.registerTool(
   },
 );
 
-server.registerTool(
+registerStructuredTool(
   "logout_contenttraker",
   {
     title: "Log Out of ContentTraker",
@@ -334,11 +482,11 @@ server.registerTool(
   },
 );
 
-server.registerTool(
+registerStructuredTool(
   "get_current_user",
   {
     title: "Get Authenticated ContentTraker User",
-    description: "Return and verify the authenticated ContentTraker user before any write.",
+    description: "Verify the effective issuer + subject ContentTraker account before any ContentKeeper business operation.",
     inputSchema: {},
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   },
@@ -351,11 +499,11 @@ server.registerTool(
   },
 );
 
-server.registerTool(
+registerStructuredTool(
   "list_workspaces",
   {
-    title: "List Authorized ContentTraker Workspaces",
-    description: "List workspaces authorized for the verified ContentTraker user.",
+    title: "List Authorized ContentTraker ContentKeepers",
+    description: "List ContentKeepers authorized for the verified issuer + subject account when the user needs to choose an exact target.",
     inputSchema: {
       searchText: z.string().optional().describe("Optional case-insensitive workspace search text."),
     },
@@ -370,16 +518,17 @@ server.registerTool(
   },
 );
 
-server.registerTool(
+registerStructuredTool(
   "confirm_contenttraker_context",
   {
     title: "Confirm ContentTraker Context",
     description:
-      "Live-verify and save a human-confirmed ContentTraker workspace, with an optional project, for this Git worktree and environment. Stores no credentials or remote assets.",
+      "Live-verify and save a human-confirmed ContentKeeper, with optional project provenance, for this exact Git worktree and environment. Stores no credentials or remote assets.",
     inputSchema: {
       repositoryRoot: z.string().min(1).describe("Absolute path inside the Git worktree that will own this local context."),
       environment: z.enum(["staging", "production"]).optional().describe("Must match the adapter's active environment."),
-      workspaceId: z.string().optional().describe("Workspace identifier to live-verify."),
+      contentKeeperId: z.string().optional().describe("Canonical ContentKeeper identifier to live-verify."),
+      workspaceId: z.string().optional().describe("Deprecated equal-value alias for contentKeeperId."),
       workspaceKey: z.string().optional().describe("Workspace key to live-verify."),
       workspaceName: z.string().optional().describe("Workspace name to live-verify."),
       projectId: z.string().optional().describe("Optional project identifier within the selected workspace."),
@@ -403,7 +552,7 @@ server.registerTool(
   },
 );
 
-server.registerTool(
+registerStructuredTool(
   "reset_contenttraker_context",
   {
     title: "Reset ContentTraker Context",
@@ -430,7 +579,7 @@ server.registerTool(
   },
 );
 
-server.registerTool(
+registerStructuredTool(
   "resolve_contenttraker_context",
   {
     title: "Resolve ContentTraker Context",
@@ -465,7 +614,7 @@ server.registerTool(
   },
 );
 
-server.registerTool(
+registerStructuredTool(
   "probe_contenttraker_api_readiness",
   {
     title: "Probe ContentTraker API Readiness",
@@ -500,7 +649,7 @@ server.registerTool(
   },
 );
 
-server.registerTool(
+registerStructuredTool(
   "inspect_contenttraker_api_contract",
   {
     title: "Inspect ContentTraker API Contract",
@@ -535,7 +684,7 @@ server.registerTool(
   },
 );
 
-server.registerTool(
+registerStructuredTool(
   "list_digital_asset_types",
   {
     title: "List Digital Asset Types",
@@ -558,7 +707,7 @@ server.registerTool(
   },
 );
 
-server.registerTool(
+registerStructuredTool(
   "get_digital_asset",
   {
     title: "Get Digital Asset",
@@ -591,7 +740,7 @@ server.registerTool(
   },
 );
 
-server.registerTool(
+registerStructuredTool(
   "search_digital_assets",
   {
     title: "Search Digital Assets",
@@ -627,7 +776,7 @@ server.registerTool(
   },
 );
 
-server.registerTool(
+registerStructuredTool(
   "create_digital_asset",
   {
     title: "Store ContentTraker Digital Asset",
@@ -679,7 +828,7 @@ server.registerTool(
   },
 );
 
-server.registerTool(
+registerStructuredTool(
   "begin_digital_asset_upload",
   {
     title: "Begin Digital Asset Upload",
@@ -715,7 +864,7 @@ server.registerTool(
   },
 );
 
-server.registerTool(
+registerStructuredTool(
   "append_digital_asset_upload_chunk",
   {
     title: "Append Digital Asset Upload Chunk",
@@ -748,7 +897,7 @@ server.registerTool(
   },
 );
 
-server.registerTool(
+registerStructuredTool(
   "complete_digital_asset_upload",
   {
     title: "Complete Digital Asset Upload",
@@ -789,7 +938,7 @@ server.registerTool(
   },
 );
 
-server.registerTool(
+registerStructuredTool(
   "update_digital_asset",
   {
     title: "Update Digital Asset",
@@ -820,7 +969,7 @@ server.registerTool(
   },
 );
 
-server.registerTool(
+registerStructuredTool(
   "set_digital_asset_status",
   {
     title: "Set ContentTraker Digital Asset Status",
@@ -855,21 +1004,22 @@ server.registerTool(
   },
 );
 
-server.registerTool(
+registerStructuredTool(
   "upsert_contenttraker_registry_mapping",
   {
     title: "Upsert ContentTraker Registry Mapping",
     description:
-      "Create or update the local ContentTraker workspace registry mapping without writing ContentTraker data.",
+      "Create or update one exact repository-to-ContentKeeper mapping without writing ContentTraker data.",
     inputSchema: {
       environment: z.enum(["staging", "production"]).optional().describe("Target ContentTraker environment."),
       projectName: z.string().min(1).describe("Local project or repository name."),
       repositoryRoot: z.string().min(1).describe("Absolute local repository root path."),
       workspaceName: z.string().optional().describe("ContentTraker workspace name."),
-      workspaceId: z.string().optional().describe("ContentTraker workspace identifier."),
+      contentKeeperId: z.string().optional().describe("Canonical ContentKeeper identifier."),
+      workspaceId: z.string().optional().describe("Deprecated equal-value alias for contentKeeperId."),
       contentTrakerProjectName: z.string().optional().describe("ContentTraker project name."),
       contentTrakerProjectId: z.string().optional().describe("ContentTraker project identifier."),
-      setDefault: z.boolean().optional().describe("Also set this mapping as the environment default."),
+      setDefault: z.boolean().optional().describe("Retain a legacy diagnostic default; business operations never route through it."),
       dryRun: z.boolean().optional().describe("Return the planned registry change without writing the file."),
     },
     annotations: {

@@ -1,5 +1,9 @@
 import type { ContentTrakerApiClient } from "./contenttraker-api-client.js";
 import { resolveGitWorktreeIdentity } from "./repository-identity.js";
+import {
+  normalizeResolveContextInput,
+  withCanonicalContentKeeperId,
+} from "./contentkeeper-id.js";
 import type {
   ContentTrakerContext,
   ContentTrakerRequestSecurityContext,
@@ -33,6 +37,19 @@ export async function resolveOperationContext(
   const environment = api.environmentProfile.name;
   const registry = loadWorkspaceRegistry(environment);
   const correlationIds: string[] = [];
+  const normalized = normalizeResolveContextInput(input);
+  input = normalized.input;
+
+  if (normalized.diagnostics.length > 0) {
+    return {
+      blocked: true,
+      failureStatus: "blocked",
+      reset: false,
+      diagnostics: normalized.diagnostics,
+      registry,
+      correlationIds,
+    };
+  }
 
   if (!environment) {
     return {
@@ -48,6 +65,7 @@ export async function resolveOperationContext(
   if (hasExplicitWorkspace(input)) {
     const explicit = withExplicitProject({
       environment,
+      contentKeeperId: trimmed(input.contentKeeperId),
       workspaceId: trimmed(input.workspaceId),
       workspaceKey: trimmed(input.workspaceKey),
       workspaceName: trimmed(input.workspaceName),
@@ -108,6 +126,7 @@ export async function resolveOperationContext(
   if (marker.binding) {
     const candidate = withExplicitProject({
       environment,
+      contentKeeperId: marker.binding.contentKeeperId,
       workspaceId: marker.binding.workspaceId,
       workspaceKey: marker.binding.workspaceKey,
       workspaceName: marker.binding.workspaceName,
@@ -152,20 +171,50 @@ export async function resolveOperationContext(
   }
 
   const registryContext = resolveContextFromRegistry(input, registry);
+  if (!registryContext) {
+    return {
+      blocked: true,
+      failureStatus: "blocked",
+      reset: false,
+      diagnostics: [
+        ...registry.errors,
+        "contentkeeper_selection_required: no human-confirmed marker or exact repository registry mapping exists; list authorized ContentKeepers and confirm one for this worktree.",
+      ],
+      registry,
+      marker,
+      correlationIds,
+    };
+  }
+  const verified = await apiClient.resolveAuthorizedContext(
+    withCanonicalContentKeeperId(withExplicitProject(registryContext, input)),
+    securityContext,
+  );
   return {
-    selectedContext: registryContext ? withExplicitProject(registryContext, input) : undefined,
-    blocked: false,
+    selectedContext: verified.selectedContext,
+    blocked: verified.status !== "ready",
+    failureStatus: verified.status === "ready" ? undefined : verified.status,
     reset: false,
-    diagnostics: registry.errors,
+    diagnostics: verified.status === "ready"
+      ? [
+          "Using the live-authorized exact repository registry mapping.",
+          ...registry.errors,
+          ...verified.diagnostics,
+        ]
+      : [
+          "context_registry_authorization_rejected: the exact repository mapping is stale or no longer authorized; no environment default was used.",
+          ...registry.errors,
+          ...verified.diagnostics,
+        ],
     registry,
     marker,
-    correlationIds,
+    correlationIds: verified.correlationIds,
   };
 }
 
 function hasExplicitWorkspace(input: ResolveContextInput): boolean {
   return Boolean(
-    input.workspaceId?.trim()
+    input.contentKeeperId?.trim()
+    || input.workspaceId?.trim()
     || input.workspaceKey?.trim()
     || input.workspaceName?.trim(),
   );

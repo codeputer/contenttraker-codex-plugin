@@ -353,13 +353,17 @@ export class DelegatedContentTrakerTokenProvider implements ContentTrakerTokenPr
   getSecurityDiagnostics(context: ContentTrakerRequestSecurityContext): RequestSecurityDiagnostics {
     const credential = this.credentialsBySession.get(sessionKey(context));
     const caller = this.effectiveCallers.get(sessionKey(context));
+    const subjectId = caller?.subjectId ?? credential?.subjectId;
+    const tokenIssuer = credential?.tokenIssuer;
     return {
       environment: context.environment,
       authenticationMode: "delegated-user-pkce",
       connectionId: context.connectionId,
       sessionId: context.sessionId,
       requestId: context.requestId,
-      authenticatedSubjectId: caller?.subjectId ?? credential?.subjectId,
+      authenticatedSubjectId: subjectId,
+      authenticatedTokenIssuer: tokenIssuer,
+      durableAccountKey: tokenIssuer && subjectId ? `${tokenIssuer}|${subjectId}` : undefined,
       credentialHandle: credential?.credentialHandle,
       credentialProfile: credential?.credentialProfile ?? resolveCredentialBinding(context, this.env).profile,
       credentialStore: this.credentialStore.provider ?? "custom",

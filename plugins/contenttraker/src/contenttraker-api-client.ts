@@ -33,6 +33,10 @@ import {
   createContentTrakerTokenProvider,
   type ContentTrakerTokenProvider,
 } from "./token-provider.js";
+import {
+  canonicalContentKeeperId,
+  normalizeContentKeeperAliases,
+} from "./contentkeeper-id.js";
 
 export interface ContentTrakerApiClient {
   getStatus(securityContext?: ContentTrakerRequestSecurityContext): ApiClientStatus;
@@ -102,6 +106,12 @@ export class EnvironmentContentTrakerApiClient implements ContentTrakerApiClient
           requiredEmail: requiredEmail || undefined,
           matched: requiredEmail ? email?.toLowerCase() === requiredEmail.toLowerCase() : undefined,
         },
+        accountIdentity: {
+          tokenIssuer: api.security?.authenticatedTokenIssuer,
+          subjectId: api.security?.authenticatedSubjectId,
+          durableAccountKey: api.security?.durableAccountKey,
+          emailIsPolicyMetadata: true,
+        },
         correlationId: response.correlationId,
       };
     } catch (error) {
@@ -123,11 +133,24 @@ export class EnvironmentContentTrakerApiClient implements ContentTrakerApiClient
         return { status: "failed", httpStatus: response.statusCode, diagnostics: [`ContentTraker /workspaces returned HTTP ${response.statusCode}.`] };
       }
       const payload = response.json;
-      const workspaces = Array.isArray(payload)
+      const rawWorkspaces = Array.isArray(payload)
         ? payload
         : isRecord(payload) && Array.isArray(payload.workspaces)
           ? payload.workspaces
           : [];
+      const workspaces = rawWorkspaces.map((workspace) => {
+        if (!isRecord(workspace)) return workspace;
+        const identifier = stringValue(workspace.contentKeeperId)
+          ?? stringValue(workspace.id)
+          ?? stringValue(workspace.workspaceId);
+        return identifier
+          ? {
+              ...workspace,
+              contentKeeperId: identifier,
+              workspaceId: stringValue(workspace.workspaceId) ?? identifier,
+            }
+          : workspace;
+      });
       return { status: "ready", environment: api.environment, workspaces, correlationId: response.correlationId };
     } catch (error) {
       return { status: "failed", environment: api.environment, diagnostics: [safeErrorMessage(error)] };
@@ -140,6 +163,14 @@ export class EnvironmentContentTrakerApiClient implements ContentTrakerApiClient
   ): Promise<AuthorizedContextResolutionResult> {
     const api = this.getStatus(securityContext);
     const correlationIds: string[] = [];
+    const aliases = normalizeContentKeeperAliases(context);
+    if (aliases.diagnostic) {
+      return {
+        status: "blocked",
+        correlationIds,
+        diagnostics: [aliases.diagnostic],
+      };
+    }
     if (!api.environmentProfile.valid || !api.configured || !api.tokenStrategy.configured) {
       return {
         status: "blocked",
@@ -149,11 +180,11 @@ export class EnvironmentContentTrakerApiClient implements ContentTrakerApiClient
         ],
       };
     }
-    if (!context.workspaceId && !context.workspaceKey && !context.workspaceName) {
+    if (!aliases.contentKeeperId && !context.workspaceKey && !context.workspaceName) {
       return {
         status: "blocked",
         correlationIds,
-        diagnostics: ["context_authorization_blocked: a workspaceId, workspaceKey, or workspaceName is required."],
+        diagnostics: ["context_authorization_blocked: a contentKeeperId, workspaceKey, or workspaceName is required."],
       };
     }
 
@@ -173,7 +204,7 @@ export class EnvironmentContentTrakerApiClient implements ContentTrakerApiClient
         };
       }
       const workspaceMatches = matchingItems(workspaceResponse.json, {
-        id: context.workspaceId,
+        id: aliases.contentKeeperId,
         key: context.workspaceKey,
         name: context.workspaceName,
       }, "workspace");
@@ -198,6 +229,7 @@ export class EnvironmentContentTrakerApiClient implements ContentTrakerApiClient
       }
       const selectedContext: ContentTrakerContext = {
         environment: api.environmentProfile.name,
+        contentKeeperId: workspace.id,
         workspaceId: workspace.id,
         workspaceKey: workspace.key,
         workspaceName: workspace.name,
@@ -254,7 +286,7 @@ export class EnvironmentContentTrakerApiClient implements ContentTrakerApiClient
         status: "ready",
         selectedContext,
         correlationIds,
-        diagnostics: ["ContentTraker workspace and optional project were live-verified for the authenticated user."],
+        diagnostics: ["ContentTraker ContentKeeper and optional project provenance were live-verified for the authenticated issuer + subject account."],
       };
     } catch (error) {
       return {
@@ -297,15 +329,16 @@ export class EnvironmentContentTrakerApiClient implements ContentTrakerApiClient
       };
     }
 
+    const contentKeeperId = canonicalContentKeeperId(context);
     checks.push(await this.getJsonCheck(api, "/me", "current-user", securityContext));
     checks.push(await this.getJsonCheck(api, "/workspaces", "workspaces", securityContext, (json) =>
-      context?.workspaceId || context?.workspaceName
-        ? itemListHasMatch(json, context.workspaceId, context.workspaceName)
+      contentKeeperId || context?.workspaceName
+        ? itemListHasMatch(json, contentKeeperId, context?.workspaceName)
         : undefined,
     ));
 
-    if (context?.workspaceId) {
-      const projectsPath = `/workspaces/${encodeURIComponent(context.workspaceId)}/projects`;
+    if (contentKeeperId && context) {
+      const projectsPath = `/workspaces/${encodeURIComponent(contentKeeperId)}/projects`;
       checks.push(await this.getJsonCheck(api, projectsPath, "workspace-projects", securityContext, (json) =>
         context.projectId || context.projectName
           ? itemListHasMatch(json, context.projectId, context.projectName)
@@ -316,7 +349,7 @@ export class EnvironmentContentTrakerApiClient implements ContentTrakerApiClient
     const failed = checks.some((check) => check.status === "failed");
     const blocked = checks.some((check) => check.status === "blocked");
 
-    if (context?.workspaceId) {
+    if (contentKeeperId && context) {
       validateWorkspaceMatch(context, checks, diagnostics);
     }
 
@@ -328,6 +361,7 @@ export class EnvironmentContentTrakerApiClient implements ContentTrakerApiClient
       status: failed ? "failed" : blocked ? "blocked" : "ready",
       api: this.getStatus(securityContext),
       selectedContext: context,
+      contentKeeperId,
       checks,
       diagnostics,
     };
@@ -446,7 +480,7 @@ export class EnvironmentContentTrakerApiClient implements ContentTrakerApiClient
     if (input.provenanceProjectId ?? context?.projectId) query.set("projectId", input.provenanceProjectId ?? context!.projectId!);
     if (input.provenanceProjectKey ?? context?.projectKey) query.set("projectKey", input.provenanceProjectKey ?? context!.projectKey!);
     const suffix = query.size > 0 ? `?${query.toString()}` : "";
-    const path = `/workspaces/${encodeURIComponent(context!.workspaceId!)}/digital-assets/${encodeURIComponent(input.digitalAssetId)}${suffix}`;
+    const path = `/workspaces/${encodeURIComponent(canonicalContentKeeperId(context)!)}/digital-assets/${encodeURIComponent(input.digitalAssetId)}${suffix}`;
 
     try {
       const response = await this.sendAuthorized("GET", api, path, securityContext);
@@ -499,7 +533,7 @@ export class EnvironmentContentTrakerApiClient implements ContentTrakerApiClient
     if (input.provenanceProjectId ?? context?.projectId) query.set("projectId", input.provenanceProjectId ?? context!.projectId!);
     if (input.provenanceProjectKey ?? context?.projectKey) query.set("projectKey", input.provenanceProjectKey ?? context!.projectKey!);
     const suffix = query.size > 0 ? `?${query.toString()}` : "";
-    const path = `/workspaces/${encodeURIComponent(context!.workspaceId!)}/digital-assets${suffix}`;
+    const path = `/workspaces/${encodeURIComponent(canonicalContentKeeperId(context)!)}/digital-assets${suffix}`;
 
     try {
       const response = await this.sendAuthorized("GET", api, path, securityContext);
@@ -549,7 +583,7 @@ export class EnvironmentContentTrakerApiClient implements ContentTrakerApiClient
       return { status: "blocked", api, selectedContext: context, digitalAssetTypes: [], diagnostics };
     }
 
-    const path = `/workspaces/${encodeURIComponent(context!.workspaceId!)}/digital-assets/types`;
+    const path = `/workspaces/${encodeURIComponent(canonicalContentKeeperId(context)!)}/digital-assets/types`;
     try {
       const response = await this.sendAuthorized("GET", api, path, securityContext);
       if (!response.ok) {
@@ -584,7 +618,7 @@ export class EnvironmentContentTrakerApiClient implements ContentTrakerApiClient
       return { status: "blocked", api, selectedContext: context, diagnostics };
     }
 
-    const path = `/workspaces/${encodeURIComponent(context!.workspaceId!)}/digital-assets/${encodeURIComponent(input.digitalAssetId)}`;
+    const path = `/workspaces/${encodeURIComponent(canonicalContentKeeperId(context)!)}/digital-assets/${encodeURIComponent(input.digitalAssetId)}`;
     const body = {
       title: input.title,
       content: input.content,
@@ -616,7 +650,7 @@ export class EnvironmentContentTrakerApiClient implements ContentTrakerApiClient
     if (!input.userApprovalStatement?.trim()) diagnostics.push("userApprovalStatement is required.");
     if (diagnostics.length > 0) return { status: "blocked", api, selectedContext: context, diagnostics };
 
-    const path = `/workspaces/${encodeURIComponent(context!.workspaceId!)}/digital-assets/uploads`;
+    const path = `/workspaces/${encodeURIComponent(canonicalContentKeeperId(context)!)}/digital-assets/uploads`;
     const body = {
       title: input.title,
       digitalAssetType: input.digitalAssetType,
@@ -648,7 +682,7 @@ export class EnvironmentContentTrakerApiClient implements ContentTrakerApiClient
     if (input.chunkContent === undefined) diagnostics.push("chunkContent is required.");
     if (diagnostics.length > 0) return { status: "blocked", api, selectedContext: context, diagnostics };
 
-    const path = `/workspaces/${encodeURIComponent(context!.workspaceId!)}/digital-assets/uploads/${encodeURIComponent(input.uploadSessionId)}/chunks/${input.chunkIndex}`;
+    const path = `/workspaces/${encodeURIComponent(canonicalContentKeeperId(context)!)}/digital-assets/uploads/${encodeURIComponent(input.uploadSessionId)}/chunks/${input.chunkIndex}`;
     const body = {
       digitalAssetType: input.digitalAssetType,
       fileName: input.fileName,
@@ -677,7 +711,7 @@ export class EnvironmentContentTrakerApiClient implements ContentTrakerApiClient
     if (!input.userApprovalStatement?.trim()) diagnostics.push("userApprovalStatement is required.");
     if (diagnostics.length > 0) return { status: "blocked", api, selectedContext: context, diagnostics };
 
-    const path = `/workspaces/${encodeURIComponent(context!.workspaceId!)}/digital-assets/uploads/${encodeURIComponent(input.uploadSessionId)}/complete`;
+    const path = `/workspaces/${encodeURIComponent(canonicalContentKeeperId(context)!)}/digital-assets/uploads/${encodeURIComponent(input.uploadSessionId)}/complete`;
     const body = {
       title: input.title,
       digitalAssetType: input.digitalAssetType,
@@ -754,7 +788,7 @@ export class EnvironmentContentTrakerApiClient implements ContentTrakerApiClient
       };
     }
 
-    const path = `/workspaces/${encodeURIComponent(context!.workspaceId!)}/digital-assets`;
+    const path = `/workspaces/${encodeURIComponent(canonicalContentKeeperId(context)!)}/digital-assets`;
     const body = {
       title: input.title,
       digitalAssetType: input.digitalAssetType,
@@ -816,7 +850,7 @@ export class EnvironmentContentTrakerApiClient implements ContentTrakerApiClient
       return { status: "blocked", api, selectedContext: context, diagnostics };
     }
 
-    const path = `/workspaces/${encodeURIComponent(context!.workspaceId!)}/digital-assets/${encodeURIComponent(input.digitalAssetId)}/status`;
+    const path = `/workspaces/${encodeURIComponent(canonicalContentKeeperId(context)!)}/digital-assets/${encodeURIComponent(input.digitalAssetId)}/status`;
     const body = {
       status: input.status,
       reason: input.reason,
@@ -927,8 +961,9 @@ export class EnvironmentContentTrakerApiClient implements ContentTrakerApiClient
       }
 
       if (method !== "GET") {
-        if (!writeContext?.workspaceId) {
-          throw new Error("ContentTraker write blocked because an explicit resolved workspaceId is required.");
+        const writeContentKeeperId = canonicalContentKeeperId(writeContext);
+        if (!writeContentKeeperId) {
+          throw new Error("ContentTraker write blocked because an explicit resolved ContentKeeperId is required.");
         }
         const workspacesResponse = await this.serverApiClient.getJson(
           api.baseUrl!, "/workspaces", credential.authorizationHeader, securityContext.correlationId,
@@ -939,8 +974,8 @@ export class EnvironmentContentTrakerApiClient implements ContentTrakerApiClient
         if (!workspacesResponse.ok) {
           throw new Error(`ContentTraker write blocked because authorized workspace verification returned HTTP ${workspacesResponse.statusCode}.`);
         }
-        if (!itemListHasIdMatch(workspacesResponse.json, writeContext.workspaceId)) {
-          throw new Error("ContentTraker write blocked because the selected workspaceId is not authorized for the verified user.");
+        if (!itemListHasIdMatch(workspacesResponse.json, writeContentKeeperId)) {
+          throw new Error("ContentTraker write blocked because the selected ContentKeeperId is not authorized for the verified issuer + subject account.");
         }
       }
 
@@ -1024,7 +1059,7 @@ function validateReadInput(
   if (context?.source === "workspace-conflict") {
     diagnostics.push("workspace_conflict: the explicit workspace differs from the exact repository/project registry mapping; no ContentTraker operation was attempted.");
   }
-  if (!context?.workspaceId) diagnostics.push("ContentTraker workspaceId is required.");
+  if (!canonicalContentKeeperId(context)) diagnostics.push("ContentTraker ContentKeeperId is required.");
   return diagnostics;
 }
 
@@ -1088,8 +1123,8 @@ function validateCreateDigitalAssetInput(
     diagnostics.push("workspace_conflict: the explicit workspace differs from the exact repository/project registry mapping; no ContentTraker write was attempted.");
   }
 
-  if (!context?.workspaceId) {
-    diagnostics.push("ContentTraker workspaceId is required; projectId is optional provenance and is not required.");
+  if (!canonicalContentKeeperId(context)) {
+    diagnostics.push("ContentTraker ContentKeeperId is required; projectId is optional provenance and is not required.");
   }
 
   if (!input.title?.trim()) {
@@ -1139,7 +1174,7 @@ function validateLifecycleWriteInput(
   if (!api.tokenStrategy.configured) diagnostics.push("ContentTraker bearer token is not configured; lifecycle write is blocked.");
   if (!api.writePolicy.writesExposed) diagnostics.push("ContentTraker write policy does not expose lifecycle writes for this environment.");
   if (context?.source === "workspace-conflict") diagnostics.push("workspace_conflict: the explicit workspace differs from the exact repository/project registry mapping; no ContentTraker write was attempted.");
-  if (!context?.workspaceId) diagnostics.push("ContentTraker workspaceId is required.");
+  if (!canonicalContentKeeperId(context)) diagnostics.push("ContentTraker ContentKeeperId is required.");
   if (!input.digitalAssetId?.trim()) diagnostics.push("digitalAssetId is required.");
   if (!["draft", "published", "archived"].includes(input.status)) diagnostics.push("status must be draft, published, or archived.");
   if (!input.userApprovalStatement?.trim()) diagnostics.push("userApprovalStatement is required for lifecycle writes.");
@@ -1162,6 +1197,7 @@ function normalizeDigitalAssetWriteResponse(value: unknown): CreateDigitalAssetR
   const record = value as Record<string, unknown>;
   return {
     digitalAssetId: stringValue(record.digitalAssetId),
+    contentKeeperId: stringValue(record.contentKeeperId) ?? stringValue(record.workspaceId),
     workspaceId: stringValue(record.workspaceId),
     workspaceKey: stringValue(record.workspaceKey),
     projectId: stringValue(record.projectId),
@@ -1183,6 +1219,7 @@ function normalizeDigitalAssetStatusResponse(value: unknown): SetDigitalAssetSta
   const record = value as Record<string, unknown>;
   return {
     digitalAssetId: stringValue(record.digitalAssetId),
+    contentKeeperId: stringValue(record.contentKeeperId) ?? stringValue(record.workspaceId),
     workspaceId: stringValue(record.workspaceId),
     workspaceKey: stringValue(record.workspaceKey),
     projectId: stringValue(record.projectId),
@@ -1212,7 +1249,7 @@ function validateWorkspaceMatch(
   }
 
   diagnostics.push(
-    `Workspace mapping '${context.workspaceId ?? context.workspaceName}' was not found in /workspaces response.`,
+    `ContentKeeper mapping '${canonicalContentKeeperId(context) ?? context.workspaceName}' was not found in /workspaces response.`,
   );
 }
 

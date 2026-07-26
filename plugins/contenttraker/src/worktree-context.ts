@@ -7,6 +7,7 @@ import {
   ensureWorktreeContextIgnored,
   WORKTREE_CONTEXT_RELATIVE_PATH,
 } from "./repository-identity.js";
+import { normalizeContentKeeperAliases } from "./contentkeeper-id.js";
 import type {
   ContentTrakerEnvironment,
   RepositoryWorktreeIdentity,
@@ -22,6 +23,7 @@ const BINDING_KEYS = new Set([
   "environment",
   "repositoryIdentity",
   "worktreeId",
+  "contentKeeperId",
   "workspaceId",
   "workspaceKey",
   "workspaceName",
@@ -170,7 +172,7 @@ export function resetWorktreeContextBinding(
 
 export function emptyDocument(): WorktreeContextDocument {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     contexts: {},
     resets: {},
   };
@@ -183,9 +185,10 @@ function parseDocument(
   assertNoSecretLikeFields(value);
   const record = requireRecord(value, "context marker");
   assertOnlyKeys(record, DOCUMENT_KEYS, "context marker");
-  if (record.schemaVersion !== 1) {
-    throw new Error("context_marker_schema_mismatch: schemaVersion must be 1.");
+  if (record.schemaVersion !== 1 && record.schemaVersion !== 2) {
+    throw new Error("context_marker_schema_mismatch: schemaVersion must be 1 or 2.");
   }
+  const sourceSchemaVersion = record.schemaVersion;
   const contextsRecord = requireEnvironmentMap(record.contexts, "contexts");
   const resetsRecord = requireEnvironmentMap(record.resets, "resets");
   const contexts: WorktreeContextDocument["contexts"] = {};
@@ -193,14 +196,19 @@ function parseDocument(
 
   for (const environment of ["staging", "production"] as const) {
     if (contextsRecord[environment] !== undefined) {
-      contexts[environment] = parseBinding(contextsRecord[environment], environment, identity);
+      contexts[environment] = parseBinding(
+        contextsRecord[environment],
+        environment,
+        identity,
+        sourceSchemaVersion,
+      );
     }
     if (resetsRecord[environment] !== undefined) {
       resets[environment] = parseReset(resetsRecord[environment], environment, identity);
     }
   }
 
-  return { schemaVersion: 1, contexts, resets };
+  return { schemaVersion: 2, contexts, resets };
 }
 
 function recoverOtherEnvironmentForReplacement(
@@ -227,7 +235,8 @@ function recoverOtherEnvironmentForReplacement(
     assertNoSecretLikeFields(parsed);
     const record = requireRecord(parsed, "context marker");
     assertOnlyKeys(record, DOCUMENT_KEYS, "context marker");
-    if (record.schemaVersion !== 1) return empty;
+    if (record.schemaVersion !== 1 && record.schemaVersion !== 2) return empty;
+    const sourceSchemaVersion = record.schemaVersion;
     const contextsRecord = requireEnvironmentMap(record.contexts, "contexts");
     const resetsRecord = requireEnvironmentMap(record.resets, "resets");
     const otherEnvironment: ContentTrakerEnvironment =
@@ -247,6 +256,7 @@ function recoverOtherEnvironmentForReplacement(
         otherBinding,
         otherEnvironment,
         identity,
+        sourceSchemaVersion,
       );
     }
     if (otherReset !== undefined) {
@@ -270,14 +280,30 @@ function parseBinding(
   value: unknown,
   environment: ContentTrakerEnvironment,
   identity: RepositoryWorktreeIdentity,
+  sourceSchemaVersion: 1 | 2,
 ): WorktreeContextBinding {
   const record = requireRecord(value, `${environment} context`);
   assertOnlyKeys(record, BINDING_KEYS, `${environment} context`);
+  const aliases = normalizeContentKeeperAliases({
+    contentKeeperId: optionalString(record.contentKeeperId, "contentKeeperId"),
+    workspaceId: optionalString(record.workspaceId, "workspaceId"),
+  });
+  if (aliases.diagnostic) {
+    throw new Error(`context_marker_invalid: ${aliases.diagnostic}`);
+  }
+  if (!aliases.contentKeeperId || (sourceSchemaVersion === 2 && !record.contentKeeperId)) {
+    throw new Error(
+      sourceSchemaVersion === 1
+        ? "context_marker_invalid: workspaceId must be a non-empty string."
+        : "context_marker_invalid: contentKeeperId must be a non-empty string.",
+    );
+  }
   const binding: WorktreeContextBinding = {
     environment: requiredLiteral(record.environment, environment, "environment"),
     repositoryIdentity: requiredString(record.repositoryIdentity, "repositoryIdentity"),
     worktreeId: requiredString(record.worktreeId, "worktreeId"),
-    workspaceId: requiredString(record.workspaceId, "workspaceId"),
+    contentKeeperId: aliases.contentKeeperId,
+    workspaceId: aliases.workspaceId!,
     workspaceKey: optionalString(record.workspaceKey, "workspaceKey"),
     workspaceName: optionalString(record.workspaceName, "workspaceName"),
     projectId: optionalString(record.projectId, "projectId"),
