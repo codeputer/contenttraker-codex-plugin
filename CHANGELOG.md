@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.5.0 - 2026-07-25 (unreleased)
+## 0.5.0 - 2026-07-26
 
 - Keeps the local client-side stdio adapter as the authoritative Codex surface and adds model-facing server instructions that select ContentTraker for direct ContentTraker work.
 - Makes `contentKeeperId` the canonical authorized routing identifier while preserving `workspaceId` as an equal-value compatibility alias and rejecting divergence.
@@ -8,6 +8,7 @@
 - Adds a preferred discriminated context input, structured output schemas for every tool, canonical ContentKeeper identifiers in business results, and corrected open-world annotations.
 - Migrates worktree markers to schema v2 and registry writes to v3 while reading legacy marker v1 and registry v1/v2 documents.
 - Adds Windows stdio cold-start and first-call performance budgets plus installation, schema, alias, default-rejection, account, representative read/write, and release-artifact verification.
+- Verifies live Codex selection of the installed local adapter through an approved staging draft write and authenticated read-back.
 
 ## 0.4.1 - 2026-07-25
 

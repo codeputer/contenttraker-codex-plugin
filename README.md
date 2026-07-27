@@ -10,7 +10,7 @@ An installation's authenticated ContentTraker user is a separate runtime identit
 
 ## Release status
 
-The `development` branch contains the unreleased 0.5.0 Epic #19 candidate. The latest immutable reviewed tag remains `v0.4.1` until 0.5.0 is merged and published. The plugin package starts without the private ContentTraker repository. Delegated sign-in uses capability-negotiated OAuth device authorization or authorization code with PKCE and never reuses a ChatGPT desktop connector session.
+Version `v0.5.0` is the latest immutable reviewed release. It completes Epic #19's account-aware, deterministic local stdio contract and live direct-storage acceptance. The plugin package starts without the private ContentTraker repository. Delegated sign-in uses capability-negotiated OAuth device authorization or authorization code with PKCE and never reuses a ChatGPT desktop connector session.
 
 ## Which ContentTraker interface this is
 
@@ -35,16 +35,16 @@ Windows browser interoperability remains disabled inside WSL. On a headless host
 
 ## Install a reviewed release
 
-The consolidated reviewed release uses the permanent plugin identity `contenttraker@contenttraker`. Install the immutable `v0.4.1` tag:
+The consolidated reviewed release uses the permanent plugin identity `contenttraker@contenttraker`. Install the immutable `v0.5.0` tag:
 
 ```bash
-codex plugin marketplace add https://github.com/codeputer/contenttraker-codex-plugin.git --ref v0.4.1
+codex plugin marketplace add https://github.com/codeputer/contenttraker-codex-plugin.git --ref v0.5.0
 codex plugin marketplace list
 codex plugin list
 codex plugin add contenttraker@contenttraker
 ```
 
-Start a new Codex session after installation so the plugin tools and skill are loaded.
+Fully restart Codex Desktop after installation, then open a new task so the plugin tools, server instructions, and skill are loaded. Existing tasks can retain the previous marketplace snapshot or a closed adapter transport.
 
 ## Cross-platform runtime capabilities
 
@@ -191,11 +191,11 @@ Then replace the marketplace snapshot and install the permanent public identity:
 
 ```bash
 codex plugin marketplace remove contenttraker
-codex plugin marketplace add https://github.com/codeputer/contenttraker-codex-plugin.git --ref v0.4.1
+codex plugin marketplace add https://github.com/codeputer/contenttraker-codex-plugin.git --ref v0.5.0
 codex plugin add contenttraker@contenttraker
 ```
 
-Start a new Codex session after upgrading.
+Fully restart Codex Desktop after upgrading, then open a new task. Existing tasks can retain the previous tool catalog or a closed adapter transport because plugin loading is a host snapshot boundary.
 
 Plugin and marketplace removal preserve operating-system keyring credentials, worktree context markers, registry mappings, and all remote ContentTraker assets. Do not call `logout_contenttraker` during this migration unless credential deletion is separately intended.
 

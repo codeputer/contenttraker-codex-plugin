@@ -78,14 +78,14 @@ The exact selected ContentKeeper ID/key was absent from the authenticated user's
 
 ## Migrating to the account-aware v0.5.0 plugin
 
-Version 0.5.0 is currently an unreleased development candidate. After its immutable tag is published, replace the marketplace snapshot and open a new task so Codex receives the server instructions and output schemas.
+Version 0.5.0 is the immutable account-aware local stdio release. Replace the marketplace snapshot with `v0.5.0`, fully restart Codex Desktop, and open a new task so Codex receives the current server instructions and output schemas. Opening only a new task can be insufficient after an in-process marketplace upgrade because the Desktop host can retain the previous tool catalog or a closed adapter transport.
 
 Existing explicit `workspaceId` calls remain valid. Marker v1 and registry v1/v2 remain readable; the next confirmed marker write emits v2 and the next registry update emits v3 with canonical `contentKeeperId`. Environment defaults remain present for diagnostics but stop routing business operations. See [ContentKeeper identity and migration](contentkeeper-migration.md).
 
-## Migrating to the identity-bound v0.4.1 plugin
+## Migrating from older plugin identities
 
 Run `codex plugin list --json` before changing the installation. Public releases use `contenttraker@contenttraker`; a separate older private/local package used `contenttraker-codex@contenttraker`. Remove every installed ContentTraker identity that the list actually reports before removing the `contenttraker` marketplace, because both identities register the same `contenttraker-codex-adapter` MCP key.
 
-Add the marketplace again at `v0.4.1`, install only `contenttraker@contenttraker`, and start a new Codex task. The final plugin list must contain exactly that one ContentTraker plugin at version 0.4.1. Configure the named profile and exact required email in the environment that launches Codex before restarting.
+Add the marketplace again at `v0.5.0`, install only `contenttraker@contenttraker`, fully restart Codex Desktop, and start a new task. The final plugin list must contain exactly that one ContentTraker plugin at version 0.5.0. Configure the named profile and exact required email in the environment that launches Codex before restarting.
 
 Plugin and marketplace removal do not delete operating-system keyring entries or remote assets. Since version 0.4.0 the plugin uses the identity-bound v2 keyring namespace and never enumerates old session-derived entries. Version 0.4.1 also prevents the packaged adapter from loading an unbound/default profile. Remove legacy `ContentTraker Codex Adapter` credentials only through the operating-system credential UI when local retention policy requires physical deletion.
