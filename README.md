@@ -23,6 +23,8 @@ Codex can expose two independent ContentTraker surfaces:
 
 The client-side stdio boundary is intentional. Codex starts the bundled adapter locally, receives its server instructions and structured tool schemas immediately, and the adapter calls the HTTPS JSON API only when a tool needs ContentTraker data. The previously attempted remote-first MCP transport is not a fallback.
 
+The additive `ask_workspace_question` tool calls `POST /workspaces/{workspaceId}/projects/{projectId}/questions` through that HTTPS API boundary. ContentTraker server code retains entitlement, retrieval, thread identity, reference-workspace policy, token accounting, and persistence. The question contract has no idempotency key, so the tool is explicitly non-idempotent and does not automatically retry its POST after an HTTP 401.
+
 When both surfaces are visible, Codex project work should use only tools with local `mcp__contenttraker_codex_adapter` provenance. The separate connector is currently observed as `mcp__codex_apps__contenttraker_com`, but that namespace is not controlled by this repository. If only that connector surface is visible, the local plugin tool surface is missing and the task should stop with that exact boundary.
 
 An isolated WSL host must also provide:
@@ -118,6 +120,8 @@ Normal verification order:
 8. `create_digital_asset` with the exact approved destination, a stable idempotency key, and `status: "draft"`
 
 `get_current_user` never starts interactive login. Without a recoverable keyring credential it returns `authentication_required` with the explicit login-tool sequence.
+
+`ask_workspace_question` is state-changing because it invokes AI and persists conversation state. It requires one live-authorized ContentKeeper/project, an explicit user approval statement, and `CONFIRM_PRODUCTION_CONTENTTRAKER_WRITE` when production writes are enabled. New threads omit both `threadId` and `sessionId`; existing threads may use `threadId`, while stable caller continuation uses `sessionId`. Reference scopes carry explicit workspace/project IDs and are authorized and evaluated only by the server. Results preserve the complete server response plus both the HTTP `X-Correlation-ID` and response correlation identifier.
 
 ## Durable worktree context
 
@@ -222,7 +226,7 @@ npm run codex-install-smoke
 
 The committed `dist/server.mjs` bundles the runtime JavaScript so Codex can start the adapter without running `npm install`. Delegated authentication uses the selected host's operating-system credential provider; no native Node package is downloaded at install time.
 
-The test suite includes a nine-sample cold-start benchmark for `initialize`, `tools/list`, and the first local diagnostic. See the recorded [stdio performance baseline](docs/performance-baseline.md).
+The test suite includes the workspace-question contract matrix plus a nine-sample cold-start benchmark for `initialize`, `tools/list`, and the first local diagnostic. See the recorded [stdio performance baseline](docs/performance-baseline.md).
 
 ## Security and licence
 

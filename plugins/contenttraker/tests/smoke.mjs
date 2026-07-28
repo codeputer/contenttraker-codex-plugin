@@ -53,6 +53,7 @@ const seenWriteBodies = [];
 const seenLifecycleBodies = [];
 const seenUpdateBodies = [];
 const seenUploadBodies = [];
+const seenQuestionBodies = [];
 
 const apiServer = https.createServer({ key: testCertificate.private, cert: testCertificate.cert }, (request, response) => {
   seenAuthorizationHeaders.push(request.headers.authorization);
@@ -103,6 +104,55 @@ const apiServer = https.createServer({ key: testCertificate.private, cert: testC
         },
       ],
     }));
+    return;
+  }
+
+  if (
+    request.method === "POST"
+    && request.url === "/workspaces/workspace-staging/projects/project-staging/questions"
+  ) {
+    readJsonBody(request, (parsed) => {
+      seenQuestionBodies.push(parsed);
+      response.setHeader("x-correlation-id", "smoke-question-http-correlation");
+      response.end(JSON.stringify({
+        success: true,
+        correlationId: "smoke-question-response-correlation",
+        workspaceId: "workspace-staging",
+        workspaceName: "ContentTraker Staging",
+        projectId: "project-staging",
+        projectName: "Sample Project Staging",
+        threadId: "thread-smoke",
+        threadName: parsed.threadName,
+        foundryThreadId: "foundry-thread-smoke",
+        question: parsed.question,
+        questionSource: parsed.questionSource,
+        callerApp: parsed.callerApp,
+        sessionId: parsed.sessionId,
+        queryScopeMode: parsed.scopeMode,
+        queryLane: "KBA",
+        scopedRetrievalProvisioned: true,
+        scopedRetrievalUnavailable: false,
+        answer: "The smoke-test workspace answer.",
+        homeAnswer: "The smoke-test workspace answer.",
+        answerSources: [{
+          workspaceId: "workspace-staging",
+          projectId: "project-staging",
+          threadId: "thread-smoke",
+          success: true,
+          answer: "The smoke-test workspace answer.",
+        }],
+        answerRole: "Assistant",
+        turnCount: 2,
+        usedDigitalAssets: true,
+        promptTokens: 12,
+        outputTokens: 8,
+        totalTokens: 20,
+        isNewThread: true,
+        referenceAnswers: parsed.referenceScopes,
+        persistence: { persisted: true },
+        message: "Workspace question answered in a new thread.",
+      }));
+    });
     return;
   }
 
@@ -537,10 +587,65 @@ try {
     "available",
   );
   assert.equal(
+    contract.capabilities.find((capability) => capability.name === "workspace-question").status,
+    "available",
+  );
+  assert.match(
+    contract.capabilities.find((capability) => capability.name === "workspace-question").reason,
+    /non-idempotent/,
+  );
+  assert.equal(
     contract.diagnostics.some((diagnostic) => diagnostic.includes("does not call the remote server-side MCP")),
     true,
   );
   assert.equal(JSON.stringify(contract).includes("internal-smoke-test"), false);
+
+  const question = await callTool({
+    name: "ask_workspace_question",
+    env: {
+      CONTENTTRAKER_CODEX_REGISTRY: stagingRegistryPath,
+      CONTENTTRAKER_ENVIRONMENT: "staging",
+      CONTENTTRAKER_API_BASE_URL: apiBaseUrl,
+    },
+    arguments: {
+      projectName: "sample-project",
+      repositoryRoot,
+      question: "What does the smoke-test workspace say?",
+      sessionId: "smoke-session",
+      threadName: "Smoke workspace question",
+      questionSource: "Copilot",
+      scopeMode: "Both",
+      callerApp: "Codex smoke test",
+      referenceScopes: [{
+        workspaceId: "workspace-reference",
+        projectId: "project-reference",
+      }],
+      userApprovalStatement: "Ask this staging smoke-test question.",
+    },
+  });
+  assert.equal(question.status, "answered");
+  assert.deepEqual(question.operationPolicy, {
+    stateChanging: true,
+    idempotencyKeySupported: false,
+    automaticRetry: false,
+  });
+  assert.equal(question.contentKeeperId, "workspace-staging");
+  assert.equal(question.workspaceId, "workspace-staging");
+  assert.equal(question.projectId, "project-staging");
+  assert.equal(question.httpCorrelationId, "smoke-question-http-correlation");
+  assert.equal(question.responseCorrelationId, "smoke-question-response-correlation");
+  assert.equal(question.response.threadId, "thread-smoke");
+  assert.equal(question.response.answer, "The smoke-test workspace answer.");
+  assert.equal(question.response.scopedRetrievalProvisioned, true);
+  assert.equal(question.response.totalTokens, 20);
+  assert.deepEqual(question.response.persistence, { persisted: true });
+  assert.equal(seenQuestionBodies.length, 1);
+  assert.deepEqual(seenQuestionBodies[0].referenceScopes, [{
+    workspaceId: "workspace-reference",
+    projectId: "project-reference",
+  }]);
+  assert.equal(Object.hasOwn(seenQuestionBodies[0], "userApprovalStatement"), false);
+  assert.equal(Object.hasOwn(seenQuestionBodies[0], "idempotencyKey"), false);
 
   const assetTypes = await callTool({
     name: "list_digital_asset_types",
@@ -957,6 +1062,19 @@ async function callTool({ name, env, arguments: toolArguments }) {
   assert.equal(Array.isArray(searchTool.inputSchema.properties.context.anyOf), true);
   assert.equal(searchTool.inputSchema.properties.context.anyOf.length, 2);
   assert.match(searchTool.inputSchema.properties.workspaceId.description, /Deprecated equal-value .*alias/);
+  const questionTool = tools.find((tool) => tool.name === "ask_workspace_question");
+  assert.ok(questionTool);
+  assert.equal(questionTool.annotations.readOnlyHint, false);
+  assert.equal(questionTool.annotations.destructiveHint, false);
+  assert.equal(questionTool.annotations.idempotentHint, false);
+  assert.equal(questionTool.annotations.openWorldHint, true);
+  assert.equal(questionTool.inputSchema.properties.question.type, "string");
+  assert.equal(questionTool.inputSchema.properties.projectId.type, "string");
+  assert.equal(questionTool.inputSchema.properties.userApprovalStatement.type, "string");
+  assert.equal(questionTool.inputSchema.properties.idempotencyKey, undefined);
+  assert.equal(questionTool.outputSchema.properties.response.type, "object");
+  assert.equal(questionTool.outputSchema.properties.httpCorrelationId.type, "string");
+  assert.equal(questionTool.outputSchema.properties.responseCorrelationId.type, "string");
   assert.equal(
     tools.some((tool) => tool.name === "resolve_contenttraker_context"),
     true,
@@ -975,6 +1093,7 @@ async function callTool({ name, env, arguments: toolArguments }) {
   assert.equal(tools.some((tool) => tool.name === "logout_contenttraker"), true);
   assert.equal(tools.some((tool) => tool.name === "get_current_user"), true);
   assert.equal(tools.some((tool) => tool.name === "list_workspaces"), true);
+  assert.equal(tools.some((tool) => tool.name === "ask_workspace_question"), true);
   assert.equal(
     tools.some((tool) => tool.name === "probe_contenttraker_api_readiness"),
     true,

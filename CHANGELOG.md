@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Adds the non-idempotent `ask_workspace_question` local MCP tool over the ContentTraker HTTPS JSON API while keeping entitlement, retrieval, thread identity, reference policy, token accounting, and persistence on the server.
+- Requires one live-authorized ContentKeeper/project, effective delegated-user verification, explicit user approval, and the existing production confirmation literal before invoking AI or persisting conversation state.
+- Preserves complete question results and correlation identifiers, maps safe ProblemDetails diagnostics, and prevents automatic delegated-401 retries for the non-idempotent question POST.
+
 ## 0.5.0 - 2026-07-26
 
 - Keeps the local client-side stdio adapter as the authoritative Codex surface and adds model-facing server instructions that select ContentTraker for direct ContentTraker work.

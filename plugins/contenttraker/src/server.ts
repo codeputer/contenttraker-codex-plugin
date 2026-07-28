@@ -17,6 +17,7 @@ import {
   type ContentTrakerTokenProvider,
 } from "./token-provider.js";
 import { appendDigitalAssetUploadChunk } from "./tools/append-digital-asset-upload-chunk.js";
+import { askWorkspaceQuestion } from "./tools/ask-workspace-question.js";
 import { beginDigitalAssetUpload } from "./tools/begin-digital-asset-upload.js";
 import { completeDigitalAssetUpload } from "./tools/complete-digital-asset-upload.js";
 import { confirmContentTrakerContext } from "./tools/confirm-contenttraker-context.js";
@@ -51,15 +52,89 @@ let apiClient = new EnvironmentContentTrakerApiClient(tokenProvider);
 const securityContextFactory = new ContentTrakerSecurityContextFactory();
 
 export const CONTENTTRAKER_SERVER_INSTRUCTIONS = [
-  "Use this local stdio ContentTraker server whenever the user asks to search, read, select, store, update, publish, archive, or troubleshoot ContentTraker content. Before every business operation, verify the effective user with get_current_user and resolve exactly one authorized ContentKeeperId. contentKeeperId is canonical; workspaceId is only an equal-value compatibility alias. Project identifiers are provenance, never authorization.",
+  "Use this local stdio ContentTraker server whenever the user asks to search, read, select, store, update, publish, archive, ask a workspace question, or troubleshoot ContentTraker content. Before every business operation, verify the effective user with get_current_user and resolve exactly one authorized ContentKeeperId. contentKeeperId is canonical; workspaceId is only an equal-value compatibility alias. Project identifiers are provenance, never ContentKeeper authorization.",
   "Prefer the context object: use source='content-keeper' with contentKeeperId for an explicit target, or source='worktree' with repositoryRoot for a saved exact mapping. Never use an environment-wide default for an unmapped worktree. If resolution is blocked, present the diagnostic and request the smallest necessary ContentTraker selection instead of silently falling back.",
-  "Before writes, obtain explicit user approval for the exact operation. Default new assets to draft, preserve the supplied content, use stable idempotency keys where required, and require the production confirmation literal when production writes are enabled. Never expose credentials or treat display names, email, repository names, or project IDs as authorization keys.",
+  "Before writes, including AI-backed workspace questions that persist conversation state, obtain explicit user approval for the exact operation. ask_workspace_question requires a live-authorized project and the production confirmation literal when production writes are enabled. Its current HTTP contract is non-idempotent, so never automatically retry it. Default new assets to draft, preserve supplied content, and use stable idempotency keys where supported. Never expose credentials or treat display names, email, repository names, or project IDs as ContentKeeper authorization keys.",
 ].join("\n\n");
 
 const structuredResultOutputSchema = z.object({
   status: z.string().optional(),
   contentKeeperId: z.string().optional(),
   diagnostics: z.array(z.string()).optional(),
+}).catchall(z.unknown());
+
+const workspaceQuestionResponseSchema = z.object({
+  success: z.boolean().optional(),
+  correlationId: z.string().nullish(),
+  workspaceId: z.string().nullish(),
+  workspaceName: z.string().nullish(),
+  projectId: z.string().nullish(),
+  projectName: z.string().nullish(),
+  threadId: z.string().nullish(),
+  threadName: z.string().nullish(),
+  foundryThreadId: z.string().nullish(),
+  question: z.string().nullish(),
+  questionSource: z.string().nullish(),
+  callerApp: z.string().nullish(),
+  sessionId: z.string().nullish(),
+  queryScopeMode: z.string().nullish(),
+  queryLane: z.string().nullish(),
+  scopedRetrievalProvisioned: z.boolean().optional(),
+  scopedRetrievalUnavailable: z.boolean().optional(),
+  answer: z.string().nullish(),
+  homeAnswer: z.string().nullish(),
+  answerSources: z.array(z.record(z.unknown())).optional(),
+  answerRole: z.string().nullish(),
+  turnCount: z.number().int().optional(),
+  usedDigitalAssets: z.boolean().optional(),
+  promptTokens: z.number().int().nullish(),
+  outputTokens: z.number().int().nullish(),
+  totalTokens: z.number().int().nullish(),
+  isNewThread: z.boolean().optional(),
+  referenceAnswers: z.array(z.record(z.unknown())).optional(),
+  message: z.string().nullish(),
+}).catchall(z.unknown());
+
+const workspaceQuestionOutputSchema = z.object({
+  status: z.enum(["answered", "blocked", "failed"]),
+  operationPolicy: z.object({
+    stateChanging: z.literal(true),
+    idempotencyKeySupported: z.literal(false),
+    automaticRetry: z.literal(false),
+  }),
+  contentKeeperId: z.string().optional(),
+  workspaceId: z.string().optional(),
+  projectId: z.string().optional(),
+  selectedContext: z.record(z.unknown()).optional(),
+  contextCorrelationIds: z.array(z.string()).optional(),
+  requestCorrelationId: z.string().optional(),
+  httpCorrelationId: z.string().optional(),
+  responseCorrelationId: z.string().optional(),
+  httpStatus: z.number().int().optional(),
+  response: workspaceQuestionResponseSchema.optional(),
+  error: z.object({
+    category: z.enum([
+      "authentication",
+      "authorization",
+      "validation",
+      "entitlement",
+      "persistence",
+      "problem-details",
+      "upstream",
+    ]),
+    httpStatus: z.number().int().optional(),
+    requiredAction: z.string().optional(),
+    problemDetails: z.object({
+      type: z.string().optional(),
+      title: z.string().optional(),
+      status: z.number().int().optional(),
+      detail: z.string().optional(),
+      instance: z.string().optional(),
+      traceId: z.string().optional(),
+      errorCode: z.string().optional(),
+    }).optional(),
+  }).optional(),
+  diagnostics: z.array(z.string()),
 }).catchall(z.unknown());
 
 const preferredContextInputSchema = z.discriminatedUnion("source", [
@@ -80,6 +155,7 @@ const contextAwareToolNames = new Set([
   "resolve_contenttraker_context",
   "probe_contenttraker_api_readiness",
   "inspect_contenttraker_api_contract",
+  "ask_workspace_question",
   "list_digital_asset_types",
   "get_digital_asset",
   "search_digital_assets",
@@ -154,7 +230,7 @@ const registerStructuredTool = ((
     {
       ...config,
       inputSchema,
-      outputSchema: structuredResultOutputSchema,
+      outputSchema: config.outputSchema ?? structuredResultOutputSchema,
       annotations,
     },
     async (...args: any[]) => normalizeStructuredToolResult(await callback(...args)),
@@ -679,6 +755,55 @@ registerStructuredTool(
           text: JSON.stringify(result, null, 2),
         },
       ],
+      structuredContent: result as unknown as Record<string, unknown>,
+    };
+  },
+);
+
+registerStructuredTool(
+  "ask_workspace_question",
+  {
+    title: "Ask a ContentTraker Workspace Question",
+    description:
+      "Invoke the ContentTraker HTTPS question API for one live-authorized ContentKeeper/project. The server owns entitlement, retrieval, thread identity, reference-workspace policy, token accounting, and persistence. This operation invokes AI and persists conversation state; the current HTTP contract is non-idempotent and is sent once without an automatic 401 retry.",
+    inputSchema: {
+      projectName: z.string().optional().describe("Local project or repository name used only to resolve an exact saved worktree mapping."),
+      workspaceId: z.string().optional().describe("Explicit ContentTraker workspace identifier."),
+      workspaceKey: z.string().optional().describe("Explicit ContentTraker workspace key."),
+      workspaceName: z.string().optional().describe("Preferred ContentTraker workspace name used only to resolve the ContentKeeper."),
+      repositoryRoot: z.string().optional().describe("Absolute local repository root used to resolve a human-confirmed worktree context."),
+      projectId: z.string().min(1).optional().describe("Explicit project ID within the selected ContentKeeper. Required unless the resolved human-confirmed worktree context already contains a project."),
+      projectKey: z.string().min(1).optional().describe("Explicit project key within the selected ContentKeeper. It is live-resolved to one project ID."),
+      question: z.string().min(1).describe("Question to ask using the server-owned workspace AI workflow."),
+      threadId: z.string().min(1).optional().describe("Existing ContentTraker thread ID. Omit to create or session-resolve a thread."),
+      sessionId: z.string().min(1).optional().describe("Stable caller session ID used by the server to continue a session thread."),
+      threadName: z.string().min(1).optional().describe("Optional title for a newly created thread."),
+      questionSource: z.string().min(1).optional().describe("Optional server-defined question source metadata."),
+      scopeMode: z.string().min(1).optional().describe("Optional server-defined scope mode."),
+      callerApp: z.string().min(1).optional().describe("Optional calling application metadata."),
+      referenceScopes: z.array(z.object({
+        workspaceId: z.string().min(1).describe("Explicit reference workspace ID."),
+        projectId: z.string().min(1).describe("Explicit reference project ID."),
+      })).optional().describe("Explicit reference workspace/project IDs. Authorization, entitlement, and reference policy remain server-owned."),
+      userApprovalStatement: z.string().min(1).describe("Required user approval statement for invoking AI and persisting workspace conversation state."),
+      productionConfirmation: z.string().optional().describe("Required exact confirmation token for production writes."),
+    },
+    outputSchema: workspaceQuestionOutputSchema,
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: true,
+    },
+  },
+  async (input, extra) => {
+    const result = await askWorkspaceQuestion(
+      input,
+      apiClient,
+      securityContextFactory.create(extra),
+    );
+    return {
+      content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
       structuredContent: result as unknown as Record<string, unknown>,
     };
   },

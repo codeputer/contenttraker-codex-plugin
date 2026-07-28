@@ -3,6 +3,8 @@ import type {
   ApiContractResult,
   ApiReadinessCheck,
   ApiReadinessResult,
+  AskWorkspaceQuestionInput,
+  AskWorkspaceQuestionResult,
   AuthorizedContextResolutionResult,
   AppendDigitalAssetUploadChunkInput,
   BeginDigitalAssetUploadInput,
@@ -22,6 +24,8 @@ import type {
   DigitalAssetUploadResult,
   SetDigitalAssetStatusInput,
   SetDigitalAssetStatusResult,
+  SafeProblemDetails,
+  WorkspaceQuestionFailureCategory,
 } from "./types.js";
 import {
   NodeContentTrakerServerApiClient,
@@ -48,6 +52,7 @@ export interface ContentTrakerApiClient {
   ): Promise<AuthorizedContextResolutionResult>;
   inspectApiContract(context: ContentTrakerContext | undefined, securityContext: ContentTrakerRequestSecurityContext): ApiContractResult;
   probeReadiness(context: ContentTrakerContext | undefined, securityContext: ContentTrakerRequestSecurityContext): Promise<ApiReadinessResult>;
+  askWorkspaceQuestion(input: AskWorkspaceQuestionInput, context: ContentTrakerContext | undefined, securityContext: ContentTrakerRequestSecurityContext): Promise<AskWorkspaceQuestionResult>;
   getDigitalAsset(input: GetDigitalAssetInput, context: ContentTrakerContext | undefined, securityContext: ContentTrakerRequestSecurityContext): Promise<GetDigitalAssetResult>;
   searchDigitalAssets(input: SearchDigitalAssetsInput, context: ContentTrakerContext | undefined, securityContext: ContentTrakerRequestSecurityContext): Promise<SearchDigitalAssetsResult>;
   listDigitalAssetTypes(input: ListDigitalAssetTypesInput, context: ContentTrakerContext | undefined, securityContext: ContentTrakerRequestSecurityContext): Promise<ListDigitalAssetTypesResult>;
@@ -405,6 +410,13 @@ export class EnvironmentContentTrakerApiClient implements ContentTrakerApiClient
         path: "/workspaces/{workspaceId}/projects",
       },
       {
+        name: "workspace-question",
+        status: "available" as const,
+        method: "POST" as const,
+        path: "/workspaces/{workspaceId}/projects/{projectId}/questions",
+        reason: "Invokes server-owned AI, retrieval, thread, entitlement, and persistence behavior. The current HTTP contract has no idempotency key, so the adapter sends this non-idempotent request once and does not retry it after an HTTP 401.",
+      },
+      {
         name: "digital-asset-search",
         status: "available" as const,
         method: "GET" as const,
@@ -458,6 +470,148 @@ export class EnvironmentContentTrakerApiClient implements ContentTrakerApiClient
       capabilities,
       diagnostics,
     };
+  }
+
+  async askWorkspaceQuestion(
+    input: AskWorkspaceQuestionInput,
+    context: ContentTrakerContext | undefined,
+    securityContext: ContentTrakerRequestSecurityContext,
+  ): Promise<AskWorkspaceQuestionResult> {
+    const api = this.getStatus(securityContext);
+    const diagnostics = validateWorkspaceQuestionInput(api, input, context);
+    const contentKeeperId = canonicalContentKeeperId(context);
+    const projectId = context?.projectId;
+    if (diagnostics.length > 0) {
+      return {
+        status: "blocked",
+        api,
+        operationPolicy: QUESTION_OPERATION_POLICY,
+        selectedContext: context,
+        contentKeeperId,
+        workspaceId: contentKeeperId,
+        projectId,
+        requestCorrelationId: securityContext.correlationId,
+        diagnostics,
+      };
+    }
+
+    const path = `/workspaces/${encodeURIComponent(contentKeeperId!)}/projects/${encodeURIComponent(projectId!)}/questions`;
+    const body = {
+      question: input.question,
+      threadId: input.threadId,
+      sessionId: input.sessionId,
+      threadName: input.threadName,
+      questionSource: input.questionSource,
+      scopeMode: input.scopeMode,
+      callerApp: input.callerApp,
+      referenceScopes: input.referenceScopes?.map((scope) => ({
+        workspaceId: scope.workspaceId,
+        projectId: scope.projectId,
+      })),
+    };
+
+    try {
+      const response = await this.sendAuthorized(
+        "POST",
+        api,
+        path,
+        securityContext,
+        body,
+        context,
+        { retryUnauthorized: false },
+      );
+      const payload = isRecord(response.json) ? response.json : undefined;
+      const responseCorrelationId = stringValue(payload?.correlationId);
+
+      if (!response.ok) {
+        const problemDetails = safeProblemDetails(response.json);
+        const category = classifyWorkspaceQuestionFailure(
+          response.statusCode,
+          problemDetails,
+        );
+        return {
+          status: "failed",
+          api,
+          operationPolicy: QUESTION_OPERATION_POLICY,
+          selectedContext: context,
+          contentKeeperId,
+          workspaceId: contentKeeperId,
+          projectId,
+          requestCorrelationId: securityContext.correlationId,
+          httpCorrelationId: response.correlationId,
+          responseCorrelationId,
+          httpStatus: response.statusCode,
+          error: {
+            category,
+            httpStatus: response.statusCode,
+            requiredAction: workspaceQuestionRequiredAction(category),
+            problemDetails,
+          },
+          diagnostics: [
+            workspaceQuestionFailureDiagnostic(
+              category,
+              response.statusCode,
+              problemDetails,
+            ),
+          ],
+        };
+      }
+
+      if (!payload) {
+        return {
+          status: "failed",
+          api,
+          operationPolicy: QUESTION_OPERATION_POLICY,
+          selectedContext: context,
+          contentKeeperId,
+          workspaceId: contentKeeperId,
+          projectId,
+          requestCorrelationId: securityContext.correlationId,
+          httpCorrelationId: response.correlationId,
+          httpStatus: response.statusCode,
+          error: {
+            category: "upstream",
+            httpStatus: response.statusCode,
+          },
+          diagnostics: [
+            "workspace_question_response_invalid: ContentTraker returned a successful HTTP status without a JSON object result.",
+          ],
+        };
+      }
+
+      return {
+        status: "answered",
+        api,
+        operationPolicy: QUESTION_OPERATION_POLICY,
+        selectedContext: context,
+        contentKeeperId,
+        workspaceId: contentKeeperId,
+        projectId,
+        requestCorrelationId: securityContext.correlationId,
+        httpCorrelationId: response.correlationId,
+        responseCorrelationId,
+        httpStatus: response.statusCode,
+        response: payload,
+        diagnostics: [],
+      };
+    } catch (error) {
+      return {
+        status: "failed",
+        api,
+        operationPolicy: QUESTION_OPERATION_POLICY,
+        selectedContext: context,
+        contentKeeperId,
+        workspaceId: contentKeeperId,
+        projectId,
+        requestCorrelationId: securityContext.correlationId,
+        error: {
+          category: "upstream",
+        },
+        diagnostics: [
+          `workspace_question_upstream_failed: ${safeErrorMessage(error)}`,
+        ],
+      };
+    }
   }
 
   async getDigitalAsset(
@@ -935,6 +1089,7 @@ export class EnvironmentContentTrakerApiClient implements ContentTrakerApiClient
     securityContext: ContentTrakerRequestSecurityContext,
     body?: unknown,
     writeContext?: ContentTrakerContext,
+    options: { retryUnauthorized?: boolean } = {},
   ): Promise<JsonResponse> {
     const send = async (options: { forceRefresh?: boolean; rejectedCredentialVersion?: string }): Promise<{
       response: JsonResponse;
@@ -1006,7 +1161,11 @@ export class EnvironmentContentTrakerApiClient implements ContentTrakerApiClient
     };
 
     const firstAttempt = await send({});
-    if (firstAttempt.response.statusCode !== 401 || api.tokenStrategy.mode !== "delegated-user-pkce") {
+    if (
+      firstAttempt.response.statusCode !== 401
+      || api.tokenStrategy.mode !== "delegated-user-pkce"
+      || options.retryUnauthorized === false
+    ) {
       return firstAttempt.response;
     }
 
@@ -1047,6 +1206,49 @@ export class EnvironmentContentTrakerApiClient implements ContentTrakerApiClient
 }
 
 const PRODUCTION_CONFIRMATION = "CONFIRM_PRODUCTION_CONTENTTRAKER_WRITE";
+const QUESTION_OPERATION_POLICY = {
+  stateChanging: true,
+  idempotencyKeySupported: false,
+  automaticRetry: false,
+} as const;
+
+function validateWorkspaceQuestionInput(
+  api: ApiClientStatus,
+  input: AskWorkspaceQuestionInput,
+  context: ContentTrakerContext | undefined,
+): string[] {
+  const diagnostics = [
+    ...api.writePolicy.diagnostics,
+    ...validateReadInput(api, context),
+  ];
+  if (!api.writePolicy.writesExposed) {
+    diagnostics.push("ContentTraker write policy does not expose AI-backed workspace questions for this environment.");
+  }
+  if (!context?.projectId?.trim()) {
+    diagnostics.push("project_context_required: ask_workspace_question requires one live-authorized project.");
+  }
+  if (!input.question?.trim()) {
+    diagnostics.push("question is required.");
+  }
+  if (!input.userApprovalStatement?.trim()) {
+    diagnostics.push("userApprovalStatement is required before invoking AI and persisting workspace conversation state.");
+  }
+  for (const [index, scope] of (input.referenceScopes ?? []).entries()) {
+    if (!scope.workspaceId?.trim()) {
+      diagnostics.push(`referenceScopes[${index}].workspaceId is required.`);
+    }
+    if (!scope.projectId?.trim()) {
+      diagnostics.push(`referenceScopes[${index}].projectId is required.`);
+    }
+  }
+  if (input.productionConfirmation && api.environment !== "production") {
+    diagnostics.push("productionConfirmation is only valid when CONTENTTRAKER_ENVIRONMENT=production.");
+  }
+  if (api.environment === "production" && input.productionConfirmation !== PRODUCTION_CONFIRMATION) {
+    diagnostics.push(`productionConfirmation must be '${PRODUCTION_CONFIRMATION}' for production writes.`);
+  }
+  return [...new Set(diagnostics)];
+}
 
 function validateReadInput(
   api: ApiClientStatus,
@@ -1378,6 +1580,97 @@ function safeErrorMessage(error: unknown): string {
   return message
     .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [REDACTED]")
     .replace(/(access_token|refresh_token|device_code|code_verifier|authorization_code|client_secret|authorization|cookie)\s*[:=]\s*[^\s,;]+/gi, "$1=[REDACTED]");
+}
+
+function safeProblemDetails(value: unknown): SafeProblemDetails | undefined {
+  if (!isRecord(value)) return undefined;
+  const status = numberValue(value.status);
+  const type = safeOptionalString(value.type);
+  const title = safeOptionalString(value.title);
+  const detail = safeOptionalString(value.detail);
+  const instance = safeOptionalString(value.instance);
+  const traceId = safeOptionalString(value.traceId);
+  const errorCode = safeOptionalString(value.errorCode);
+  if (
+    status === undefined
+    && !type
+    && !title
+    && !detail
+    && !instance
+    && !traceId
+    && !errorCode
+  ) {
+    return undefined;
+  }
+  return {
+    type,
+    title,
+    status,
+    detail,
+    instance,
+    traceId,
+    errorCode,
+  };
+}
+
+function safeOptionalString(value: unknown): string | undefined {
+  return typeof value === "string" ? safeErrorMessage(value) : undefined;
+}
+
+function classifyWorkspaceQuestionFailure(
+  statusCode: number,
+  problemDetails: SafeProblemDetails | undefined,
+): WorkspaceQuestionFailureCategory {
+  if (statusCode === 401) return "authentication";
+  if (statusCode === 403) return "authorization";
+  if (statusCode === 400 || statusCode === 422) return "validation";
+
+  const summary = `${problemDetails?.title ?? ""} ${problemDetails?.detail ?? ""}`.toLowerCase();
+  if (
+    statusCode === 402
+    || summary.includes("entitlement")
+    || summary.includes("ai-backed workspace questions are blocked")
+  ) {
+    return "entitlement";
+  }
+  if (
+    summary.includes("could not be saved")
+    || summary.includes("persistence")
+    || summary.includes("persist")
+  ) {
+    return "persistence";
+  }
+  return problemDetails ? "problem-details" : "upstream";
+}
+
+function workspaceQuestionRequiredAction(
+  category: WorkspaceQuestionFailureCategory,
+): string | undefined {
+  if (category === "authentication") {
+    return "Run begin_contenttraker_login, complete delegated authorization, then verify get_current_user before asking again.";
+  }
+  if (category === "authorization") {
+    return "Verify the effective user and the selected ContentKeeper/project authorization; do not substitute another workspace.";
+  }
+  if (category === "entitlement") {
+    return "Resolve the server-reported workspace-question entitlement before asking again.";
+  }
+  if (category === "validation") {
+    return "Correct the server-reported request validation problem before asking again.";
+  }
+  if (category === "persistence") {
+    return "Treat the question outcome as uncertain and inspect the server-side thread before manually retrying.";
+  }
+  return undefined;
+}
+
+function workspaceQuestionFailureDiagnostic(
+  category: WorkspaceQuestionFailureCategory,
+  statusCode: number,
+  problemDetails: SafeProblemDetails | undefined,
+): string {
+  const detail = problemDetails?.detail ?? problemDetails?.title;
+  return `workspace_question_${category.replace("-", "_")}_failed: ContentTraker returned HTTP ${statusCode}${detail ? `: ${detail}` : "."}`;
 }
 
 function assertHttpsAudienceBoundApi(baseUrl: string, audience: string): void {

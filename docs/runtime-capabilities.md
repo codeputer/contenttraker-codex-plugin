@@ -47,6 +47,10 @@ Capability status values are:
 
 The tool never returns access tokens, refresh tokens, browser state, cookies, keyring contents, or other credentials.
 
+## HTTPS API capability reporting
+
+`inspect_contenttraker_api_contract` reports the separate authenticated HTTPS JSON API surface. Its `workspace-question` capability identifies `POST /workspaces/{workspaceId}/projects/{projectId}/questions` and records that the current route has no idempotency-key contract. The local `ask_workspace_question` tool therefore reports `stateChanging: true`, `idempotencyKeySupported: false`, and `automaticRetry: false`; it never uses the remote `/mcp` interface as an upstream.
+
 ## Selection precedence
 
 1. Validate `CONTENTTRAKER_ENVIRONMENT` independently.

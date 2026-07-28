@@ -1,6 +1,6 @@
 ---
 name: contenttraker-mcp
-description: Use the local ContentTraker adapter to verify identity, resolve workspace context, and work with digital assets.
+description: Use the local ContentTraker adapter to verify identity, resolve workspace context, ask workspace questions, and work with digital assets.
 ---
 
 # ContentTraker Local Adapter
@@ -31,6 +31,8 @@ Before any write:
 4. Obtain explicit user approval for the exact write.
 
 Create assets as drafts unless the user explicitly authorizes another supported lifecycle state. Use a stable idempotency key for create and lifecycle writes.
+
+`ask_workspace_question` is also a write because it invokes AI and persists conversation state. Require one live-authorized project plus the user's approval statement. Reference scopes must contain explicit workspace/project IDs; their authorization, entitlement, retrieval, and policy remain server-owned. The current HTTP question contract has no idempotency key, so advertise the operation as non-idempotent, send it once, and never automatically retry it after an HTTP failure. Production requires `CONFIRM_PRODUCTION_CONTENTTRAKER_WRITE`.
 
 ## Durable worktree context
 

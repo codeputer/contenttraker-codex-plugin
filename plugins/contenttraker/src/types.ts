@@ -416,6 +416,26 @@ export interface UpdateDigitalAssetInput extends ResolveContextInput {
   productionConfirmation?: string;
 }
 
+export interface WorkspaceQuestionReferenceScope {
+  workspaceId: string;
+  projectId: string;
+}
+
+export interface AskWorkspaceQuestionInput extends ResolveContextInput {
+  question: string;
+  projectId?: string;
+  projectKey?: string;
+  threadId?: string;
+  sessionId?: string;
+  threadName?: string;
+  questionSource?: string;
+  scopeMode?: string;
+  callerApp?: string;
+  referenceScopes?: WorkspaceQuestionReferenceScope[];
+  userApprovalStatement: string;
+  productionConfirmation?: string;
+}
+
 export interface BeginDigitalAssetUploadInput extends ResolveContextInput {
   title: string;
   digitalAssetType: string;
@@ -656,6 +676,52 @@ export interface UpdateDigitalAssetResult {
   contentKeeperId?: string;
   asset?: Record<string, unknown>;
   httpStatus?: number;
+  diagnostics: string[];
+}
+
+export type WorkspaceQuestionFailureCategory =
+  | "authentication"
+  | "authorization"
+  | "validation"
+  | "entitlement"
+  | "persistence"
+  | "problem-details"
+  | "upstream";
+
+export interface SafeProblemDetails {
+  type?: string;
+  title?: string;
+  status?: number;
+  detail?: string;
+  instance?: string;
+  traceId?: string;
+  errorCode?: string;
+}
+
+export interface AskWorkspaceQuestionResult {
+  status: "answered" | "blocked" | "failed";
+  api: ApiClientStatus;
+  operationPolicy: {
+    stateChanging: true;
+    idempotencyKeySupported: false;
+    automaticRetry: false;
+  };
+  selectedContext?: ContentTrakerContext;
+  contextCorrelationIds?: string[];
+  contentKeeperId?: string;
+  workspaceId?: string;
+  projectId?: string;
+  requestCorrelationId?: string;
+  httpCorrelationId?: string;
+  responseCorrelationId?: string;
+  httpStatus?: number;
+  response?: Record<string, unknown>;
+  error?: {
+    category: WorkspaceQuestionFailureCategory;
+    httpStatus?: number;
+    requiredAction?: string;
+    problemDetails?: SafeProblemDetails;
+  };
   diagnostics: string[];
 }
 
