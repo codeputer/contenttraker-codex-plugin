@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Converts the default branch to a public distribution-only mirror while
+  retaining the complete source history in Git.
+- Names `PhxBiz/ArticleMngrSLN:components/contenttraker-codex-plugin/` as the
+  only authoritative implementation source.
+- Retains the exact v0.5.0 prebuilt runtime, skills, manifests, licences, and
+  operator documentation, with machine-readable provenance and distribution
+  validation.
+
 ## 0.5.0 - 2026-07-26
 
 - Keeps the local client-side stdio adapter as the authoritative Codex surface and adds model-facing server instructions that select ContentTraker for direct ContentTraker work.

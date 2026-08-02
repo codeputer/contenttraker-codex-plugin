@@ -7,8 +7,8 @@
     "email": "richard@phoenixbussolutions.com",
     "url": "https://contenttraker.com"
   },
-  "homepage": "https://github.com/codeputer/contenttraker-codex-plugin",
-  "repository": "https://github.com/codeputer/contenttraker-codex-plugin",
+  "homepage": "https://github.com/PhxBiz/contenttraker-codex-plugin",
+  "repository": "https://github.com/PhxBiz/contenttraker-codex-plugin",
   "license": "MIT",
   "keywords": ["contenttraker", "codex", "mcp", "oauth", "wsl"],
   "skills": "./skills/",

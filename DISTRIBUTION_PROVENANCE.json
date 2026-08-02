@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "distributionRepository": "PhxBiz/contenttraker-codex-plugin",
+  "purpose": "Public release and distribution mirror only",
+  "authoritativeSource": {
+    "repository": "PhxBiz/ArticleMngrSLN",
+    "branch": "development",
+    "componentPath": "components/contenttraker-codex-plugin",
+    "ownershipPolicyCommit": "433b9612671473da5c2c0d2cb713b3caa4208b86"
+  },
+  "release": {
+    "version": "0.5.0",
+    "tag": "v0.5.0",
+    "releaseCommit": "56a2ff4d4e89461c4134d03e0c2630a7c326ab38",
+    "releaseTree": "beaf586bf46dc5439a03b46563760a57be0de93d",
+    "releaseUrl": "https://github.com/PhxBiz/contenttraker-codex-plugin/releases/tag/v0.5.0",
+    "runtimeArtifact": {
+      "path": "plugins/contenttraker/dist/server.mjs",
+      "sha256": "3C3E83D851CE13B47461A94F1A19B42CDA50B5C950EBEED3150D2168AA74834D"
+    }
+  },
+  "historyPreservation": {
+    "repository": "PhxBiz/ArticleMngrSLN",
+    "ref": "refs/heads/preservation/imported/2026-08-02/contenttraker-codex-plugin",
+    "tip": "4981bfb855dd604e3bc1925890ee107aa422e272",
+    "containsReleaseCommit": true
+  },
+  "baselineVerification": {
+    "date": "2026-08-02",
+    "fullSourceSuite": "passed",
+    "deterministicReleaseArtifact": "passed",
+    "host": "Windows x64",
+    "nodeVersion": "v24.15.0"
+  }
+}
