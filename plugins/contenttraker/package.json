@@ -2,37 +2,19 @@
   "name": "contenttraker",
   "version": "0.5.0",
   "private": true,
+  "description": "Prebuilt public distribution of the ContentTraker Codex plugin.",
   "license": "MIT",
   "type": "module",
-  "scripts": {
-    "build": "tsc --noEmit && esbuild src/main.ts --bundle --minify --platform=node --format=esm --target=node18 --outfile=dist/server.mjs",
-    "build-internal-test-server": "tsc --noEmit -p tsconfig.tests.json && esbuild tests/internal-test-server.ts --bundle --platform=node --format=esm --target=node18 --outfile=node_modules/.cache/contenttraker-internal-test-server.mjs",
-    "smoke": "npm run build && npm run build-internal-test-server && node tests/smoke.mjs",
-    "auth-concurrency": "tsc --noEmit -p tsconfig.tests.json && esbuild tests/auth-concurrency.ts --bundle --platform=node --format=esm --target=node18 --outfile=node_modules/.cache/contenttraker-auth-concurrency.mjs && node node_modules/.cache/contenttraker-auth-concurrency.mjs",
-    "runtime-capabilities": "tsc --noEmit -p tsconfig.tests.json && esbuild tests/runtime-capabilities.ts --bundle --platform=node --format=esm --target=node18 --outfile=node_modules/.cache/contenttraker-runtime-capabilities.mjs && node node_modules/.cache/contenttraker-runtime-capabilities.mjs",
-    "authorization-interaction": "tsc --noEmit -p tsconfig.tests.json && esbuild tests/authorization-interaction.ts --bundle --platform=node --format=esm --target=node18 --outfile=node_modules/.cache/contenttraker-authorization-interaction.mjs && node node_modules/.cache/contenttraker-authorization-interaction.mjs",
-    "credential-store": "tsc --noEmit -p tsconfig.tests.json && esbuild tests/credential-store.ts --bundle --platform=node --format=esm --target=node18 --outfile=node_modules/.cache/contenttraker-credential-store.mjs && node node_modules/.cache/contenttraker-credential-store.mjs",
-    "credential-restoration": "tsc --noEmit -p tsconfig.tests.json && esbuild tests/credential-restoration.ts --bundle --platform=node --format=esm --target=node18 --outfile=node_modules/.cache/contenttraker-credential-restoration.mjs && node node_modules/.cache/contenttraker-credential-restoration.mjs",
-    "oauth-metadata": "tsc --noEmit -p tsconfig.tests.json && esbuild tests/oauth-metadata.ts --bundle --platform=node --format=esm --target=node18 --outfile=node_modules/.cache/contenttraker-oauth-metadata.mjs && node node_modules/.cache/contenttraker-oauth-metadata.mjs",
-    "device-authorization": "tsc --noEmit -p tsconfig.tests.json && esbuild tests/device-authorization.ts --bundle --platform=node --format=esm --target=node18 --outfile=node_modules/.cache/contenttraker-device-authorization.mjs && node node_modules/.cache/contenttraker-device-authorization.mjs",
-    "workspace-safety": "tsc --noEmit -p tsconfig.tests.json && esbuild tests/workspace-safety.ts --bundle --platform=node --format=esm --target=node18 --outfile=node_modules/.cache/contenttraker-workspace-safety.mjs && node node_modules/.cache/contenttraker-workspace-safety.mjs",
-    "worktree-context": "tsc --noEmit -p tsconfig.tests.json && esbuild tests/worktree-context.ts --bundle --platform=node --format=esm --target=node18 --outfile=node_modules/.cache/contenttraker-worktree-context.mjs && node node_modules/.cache/contenttraker-worktree-context.mjs",
-    "native-credential-store": "tsc --noEmit -p tsconfig.tests.json && esbuild tests/native-credential-store.ts --bundle --platform=node --format=esm --target=node18 --outfile=node_modules/.cache/contenttraker-native-credential-store.mjs && node node_modules/.cache/contenttraker-native-credential-store.mjs",
-    "stdio-performance": "npm run build && node tests/stdio-performance.mjs",
-    "codex-install-smoke": "node tests/codex-install-smoke.mjs",
-    "release-artifact": "node tests/release-artifact.mjs",
-    "test": "npm run smoke && npm run auth-concurrency && npm run runtime-capabilities && npm run authorization-interaction && npm run credential-store && npm run credential-restoration && npm run oauth-metadata && npm run device-authorization && npm run workspace-safety && npm run worktree-context && npm run stdio-performance"
+  "engines": {
+    "node": ">=18"
   },
-  "devDependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0",
-    "@openai/codex": "0.146.0-alpha.3.1",
-    "@types/node": "^24.0.0",
-    "esbuild": "^0.25.0",
-    "selfsigned": "^5.5.0",
-    "typescript": "^5.8.0",
-    "zod": "^3.25.76"
-  },
-  "overrides": {
-    "fast-uri": "3.1.4"
-  }
+  "files": [
+    ".codex-plugin/",
+    ".mcp.json",
+    "dist/",
+    "skills/",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+    "THIRD_PARTY_LICENSES/"
+  ]
 }

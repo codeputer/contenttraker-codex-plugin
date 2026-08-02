@@ -1,6 +1,14 @@
 # ContentTraker Codex Plugin
 
-Public, reviewable Codex marketplace package for the ContentTraker local MCP adapter. The private ContentTraker application remains in a separate private repository; this repository contains only the client adapter, its tests, plugin metadata, and operator documentation.
+This is the public release and distribution mirror for the ContentTraker Codex
+plugin. It contains the reviewed prebuilt marketplace payload, licences, and
+operator documentation. It does not contain implementation source or tests.
+
+Authoritative source is private and lives only at
+`PhxBiz/ArticleMngrSLN:components/contenttraker-codex-plugin/`. All fixes,
+features, and release preparation begin there on a branch based on
+`development`. See [AGENTS.md](AGENTS.md) and
+[DISTRIBUTION_PROVENANCE.json](DISTRIBUTION_PROVENANCE.json).
 
 ## Stewardship and runtime identity
 
@@ -38,7 +46,7 @@ Windows browser interoperability remains disabled inside WSL. On a headless host
 The consolidated reviewed release uses the permanent plugin identity `contenttraker@contenttraker`. Install the immutable `v0.5.0` tag:
 
 ```bash
-codex plugin marketplace add https://github.com/codeputer/contenttraker-codex-plugin.git --ref v0.5.0
+codex plugin marketplace add https://github.com/PhxBiz/contenttraker-codex-plugin.git --ref v0.5.0
 codex plugin marketplace list
 codex plugin list
 codex plugin add contenttraker@contenttraker
@@ -191,7 +199,7 @@ Then replace the marketplace snapshot and install the permanent public identity:
 
 ```bash
 codex plugin marketplace remove contenttraker
-codex plugin marketplace add https://github.com/codeputer/contenttraker-codex-plugin.git --ref v0.5.0
+codex plugin marketplace add https://github.com/PhxBiz/contenttraker-codex-plugin.git --ref v0.5.0
 codex plugin add contenttraker@contenttraker
 ```
 
@@ -210,19 +218,22 @@ Removing the plugin does not delete operating-system keyring entries. Revoke Con
 
 Before removal, `logout_contenttraker` with confirmation `LOGOUT_CONTENTTRAKER` deletes the selected v2 local keyring credential. `forget_contenttraker_credential` remains available for compatibility. Neither tool revokes server authorization; use the ContentTraker account security workflow for that separate action.
 
-## Build and verify
+## Verify this distribution
 
 ```bash
-cd plugins/contenttraker
-npm ci
-npm test
-npm run release-artifact
-npm run codex-install-smoke
+node .github/scripts/validate-distribution.mjs
 ```
 
-The committed `dist/server.mjs` bundles the runtime JavaScript so Codex can start the adapter without running `npm install`. Delegated authentication uses the selected host's operating-system credential provider; no native Node package is downloaded at install time.
+The validator rejects source, tests, caches, dependency trees, and build
+configuration; verifies the provenance and artifact hash; and launches the
+prebuilt adapter to check its identity and tool schemas. Complete source,
+security, and release-artifact tests run in the authoritative repository before
+an export reaches this mirror.
 
-The test suite includes a nine-sample cold-start benchmark for `initialize`, `tools/list`, and the first local diagnostic. See the recorded [stdio performance baseline](docs/performance-baseline.md).
+The committed `dist/server.mjs` bundles the runtime JavaScript so Codex can
+start the adapter without running `npm install`. Delegated authentication uses
+the selected host's operating-system credential provider; no native Node
+package is downloaded at install time.
 
 ## Security and licence
 

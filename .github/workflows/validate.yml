@@ -1,4 +1,4 @@
-name: validate
+name: Validate distribution
 
 on:
   push:
@@ -8,67 +8,16 @@ permissions:
   contents: read
 
 jobs:
-  host-matrix:
-    name: Node 18 / ${{ matrix.os }}
+  distribution:
+    name: Distribution / Node 18 / ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
-    defaults:
-      run:
-        working-directory: plugins/contenttraker
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 18
-          cache: npm
-          cache-dependency-path: plugins/contenttraker/package-lock.json
-      - run: npm ci
-      - run: npm test
-      - name: Verify Windows Credential Manager round trip
-        if: runner.os == 'Windows'
-        run: npm run native-credential-store
-        env:
-          CONTENTTRAKER_EXPECT_NATIVE_CREDENTIAL_STORE: windows-credential-manager
-      - name: Verify macOS Keychain round trip
-        if: runner.os == 'macOS'
-        run: npm run native-credential-store
-        env:
-          CONTENTTRAKER_EXPECT_NATIVE_CREDENTIAL_STORE: macos-keychain
-      - name: Verify extracted artifact and audit bundled dependencies
-        run: npm run release-artifact
-        env:
-          CONTENTTRAKER_EXPECT_RUNTIME_STATUS: blocked
-      - name: Verify Codex marketplace registration and installed adapter
-        run: npm run codex-install-smoke
-        env:
-          CONTENTTRAKER_EXPECT_RUNTIME_STATUS: blocked
-      - run: git diff --exit-code -- dist/server.mjs package-lock.json
-
-  container:
-    name: Node 18 / Linux container
-    runs-on: ubuntu-latest
-    container: node:18-bookworm
-    defaults:
-      run:
-        working-directory: plugins/contenttraker
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install Git runtime dependency
-        run: |
-          apt-get update
-          apt-get install -y --no-install-recommends git ca-certificates
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-      - run: npm ci
-      - run: npm test
-      - name: Verify extracted artifact and audit bundled dependencies
-        run: npm run release-artifact
-        env:
-          CONTENTTRAKER_EXPECT_RUNTIME_STATUS: blocked
-      - name: Verify Codex marketplace registration and installed adapter
-        run: npm run codex-install-smoke
-        env:
-          CONTENTTRAKER_EXPECT_RUNTIME_STATUS: blocked
-      - run: git diff --exit-code -- dist/server.mjs package-lock.json
+      - run: node .github/scripts/validate-distribution.mjs
